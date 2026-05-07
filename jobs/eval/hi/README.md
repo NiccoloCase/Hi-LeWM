@@ -12,6 +12,9 @@ Hierarchical PushT evaluation jobs, organized by goal offset and experiment type
 
 ## d25 scripts
 
+- `joint_22368719_epoch25_d25_eval.sh`
+- `hope3_ep13_d25_eval.sh`
+- `stride5n4_ep15_d25_eval.sh`
 - `d25_hierarchical_default_eval.sh`
 - `d25_flat_default_eval.sh`
 - `d25_hierarchical_soft_eval.sh`
@@ -27,6 +30,9 @@ Hierarchical PushT evaluation jobs, organized by goal offset and experiment type
 
 ## d50 scripts
 
+- `joint_22368719_epoch25_d50_eval.sh`
+- `hope3_ep13_d50_eval.sh`
+- `stride5n4_ep15_d50_eval.sh`
 - `d50_hierarchical_default_eval.sh`
 - `d50_hierarchical_soft_low_h2_eval.sh`
 - `d50_hierarchical_soft_low_h2_paper_scaled_eval.sh`

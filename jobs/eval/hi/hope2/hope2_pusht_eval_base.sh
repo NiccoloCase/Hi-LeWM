@@ -1,37 +1,16 @@
 #!/bin/bash
 
-# Snellius eval job for Hi-LeWM on PushT (short, d=25) in hierarchical mode,
-# with a softer high-level planner and lower low-level horizon.
+# Shared eval launcher for the current hope2 PushT hierarchical run.
 #
 # Default behavior:
-# - Uses run: hi_lewm_p2_train_hope1_21983875
+# - Uses run: hi_lewm_p2_train_hope2_22253175
 # - Auto-selects latest object checkpoint in that run directory
 # - Forces planning.mode=hierarchical
-# - Sets eval.goal_offset_steps=25
-# - Sets eval.eval_budget=30
-# - Uses high horizon=1, receding_horizon=1, action_block=1, k=5
-# - Uses high topk=10 and low topk=150 (best observed in prior short-hier-soft run)
-# - Uses lower low-level horizon default: 3 (vs 5), while keeping action_block=5
+# - Device is controlled via EVAL_DEVICE and solver-device overrides
 #
-# Usage:
-#   cd jobs/eval/hi/d25
-#   sbatch d25_hierarchical_soft_low_horizon_base_eval.sh
-#   sbatch --export=ALL,EVAL_DEVICE=cpu --partition=cpu --gpus=0 d25_hierarchical_soft_low_horizon_base_eval.sh
-#
-# Common overrides:
-#   sbatch --export=ALL,CHECKPOINT_EPOCH=8 d25_hierarchical_soft_low_horizon_base_eval.sh
-#   sbatch --export=ALL,HIGH_HORIZON=1,HIGH_REPLAN_INTERVAL=5 d25_hierarchical_soft_low_horizon_base_eval.sh
-#   sbatch --export=ALL,LOW_HORIZON=2 d25_hierarchical_soft_low_horizon_base_eval.sh
-#   sbatch --export=ALL,EVAL_BUDGET=40 d25_hierarchical_soft_low_horizon_base_eval.sh
-
-#SBATCH --partition=gpu_mig
-#SBATCH --gpus=1
-#SBATCH --job-name=hi_eval_d25_hier_soft_low_horizon_base
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --time=02:00:00
-#SBATCH --output=d25_hierarchical_soft_low_horizon_base_eval_%j.out
-#SBATCH --error=d25_hierarchical_soft_low_horizon_base_eval_%j.err
+# Intended use:
+# - Called by wrapper scripts in this folder
+# - May also be launched directly with env overrides
 
 set -euo pipefail
 
@@ -94,7 +73,6 @@ module purge
 module load 2025
 module load Anaconda3/2025.06-1
 
-# Some cluster conda activation scripts reference unset vars; keep strict mode elsewhere.
 set +u
 eval "$(conda shell.bash hook)"
 if conda env list | grep -E '(^|[[:space:]])lewm-gpu([[:space:]]|$)' >/dev/null 2>&1; then
@@ -109,15 +87,14 @@ fi
 set -u
 
 export STABLEWM_HOME="${STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
-RUN_NAME="${RUN_NAME:-hi_lewm_p2_train_hope1_21983875}"
-CHECKPOINT_EPOCH="${CHECKPOINT_EPOCH:-latest}"  # latest or integer >= 1
+RUN_NAME="${RUN_NAME:-hi_lewm_p2_train_hope2_22253175}"
+CHECKPOINT_EPOCH="${CHECKPOINT_EPOCH:-latest}"
 CONFIG_NAME="${CONFIG_NAME:-hi_pusht}"
 GOAL_OFFSET_STEPS="${GOAL_OFFSET_STEPS:-25}"
-EVAL_BUDGET="${EVAL_BUDGET:-30}"
-EVAL_SUBDIR="${EVAL_SUBDIR:-eval_hier_soft_lowerh_d${GOAL_OFFSET_STEPS}_job_${SLURM_JOB_ID:-$(date +%Y%m%d_%H%M%S)}}"
-EVAL_DEVICE="${EVAL_DEVICE:-cuda}"  # one of: cuda, cpu
+EVAL_BUDGET="${EVAL_BUDGET:-50}"
+EVAL_SUBDIR="${EVAL_SUBDIR:-eval_hope2_d${GOAL_OFFSET_STEPS}_job_${SLURM_JOB_ID:-$(date +%Y%m%d_%H%M%S)}}"
+EVAL_DEVICE="${EVAL_DEVICE:-cpu}"
 
-# Softer high-level settings for short-horizon hierarchical ablation.
 HIGH_NUM_SAMPLES="${HIGH_NUM_SAMPLES:-900}"
 HIGH_N_STEPS="${HIGH_N_STEPS:-20}"
 HIGH_TOPK="${HIGH_TOPK:-10}"
@@ -138,8 +115,6 @@ DATASET_PATH="${STABLEWM_HOME}/pusht_expert_train.h5"
 
 if [[ ! -f "${DATASET_PATH}" ]]; then
   echo "ERROR: dataset file not found: ${DATASET_PATH}" >&2
-  echo "Run setup first, for example:" >&2
-  echo "  sbatch --export=ALL,STABLEWM_HOME=${STABLEWM_HOME} jobs/setup/download_pusht.sh" >&2
   exit 3
 fi
 
@@ -169,7 +144,6 @@ fi
 
 if [[ ! -f "${CKPT_OBJECT_PATH}" ]]; then
   echo "ERROR: checkpoint not found: ${CKPT_OBJECT_PATH}" >&2
-  echo "Available checkpoints in ${RUN_DIR}:" >&2
   ls -1 "${RUN_DIR}"/*_object.ckpt >&2 || true
   exit 7
 fi
@@ -184,7 +158,7 @@ fi
 POLICY="${CKPT_OBJECT_PATH#${STABLEWM_HOME}/}"
 POLICY="${POLICY%_object.ckpt}"
 POLICY_BASENAME="$(basename "${POLICY}")"
-RESULT_FILENAME="${RESULT_FILENAME:-${POLICY_BASENAME}_hi_pusht_results_d${GOAL_OFFSET_STEPS}_hier_soft_lowerh.txt}"
+RESULT_FILENAME="${RESULT_FILENAME:-${POLICY_BASENAME}_hi_pusht_results_d${GOAL_OFFSET_STEPS}_hope2.txt}"
 ARTIFACTS_DIR="$(dirname "${CKPT_OBJECT_PATH}")/${EVAL_SUBDIR}"
 RESULT_PATH="${ARTIFACTS_DIR}/${RESULT_FILENAME}"
 MANIFEST_PATH="${ARTIFACTS_DIR}/${RESULT_FILENAME%.*}_episodes.tsv"
@@ -209,8 +183,6 @@ echo "Episode manifest: ${MANIFEST_PATH}"
 
 cd "${REPO_ROOT}"
 
-# Compatibility for object checkpoints pickled from baseline code:
-# torch.load may need top-level imports like module / utils from third_party/lewm.
 if [[ -n "${PYTHONPATH:-}" ]]; then
   export PYTHONPATH="${REPO_ROOT}/third_party/lewm:${REPO_ROOT}:${PYTHONPATH}"
 else
@@ -219,7 +191,6 @@ fi
 echo "PYTHONPATH prefix: ${REPO_ROOT}/third_party/lewm:${REPO_ROOT}"
 
 if [[ "${EVAL_DEVICE}" == "cpu" ]]; then
-  # Avoid accidental CUDA use when cpu mode is requested.
   export CUDA_VISIBLE_DEVICES=""
   export MUJOCO_GL="${MUJOCO_GL:-osmesa}"
 fi

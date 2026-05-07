@@ -1,28 +1,38 @@
 #!/bin/bash
 
-# Snellius training job (simple):
+# Snellius training job:
 # - Read dataset + pretrained checkpoint from node-local TMPDIR (scratch-node)
-# - Save training artifacts directly to shared scratch
+# - Jointly train both low-level and high-level paths
+# - Save per-epoch object checkpoints and per-epoch training-state checkpoints
 #
 # Usage:
 #   cd jobs/train/pusht
-#   sbatch train_hope1.sh
+#   sbatch train_joint_levels.sh
+#
+# Default configuration:
+#   - MAX_EPOCHS=50
+#   - LATENT_ACTION_DIM=32
+#   - alpha=1.0, beta=1.0
+#   - SIGREG_WEIGHT=0.2
+#   - BATCH_SIZE=16 with ACCUMULATE_GRAD_BATCHES=8 (effective batch 128)
 #
 # Optional overrides:
-#   MAX_EPOCHS=10 sbatch train_hope1.sh
-#   LATENT_ACTION_DIM=64 sbatch train_hope1.sh
-#   TRAIN_RUN_NAME=hi_lewm_p2_train_hope1_custom sbatch train_hope1.sh
-#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch train_hope1.sh
+#   MAX_EPOCHS=50 sbatch train_joint_levels.sh
+#   LATENT_ACTION_DIM=32 sbatch train_joint_levels.sh
+#   SIGREG_WEIGHT=0.1 sbatch train_joint_levels.sh
+#   BATCH_SIZE=8 ACCUMULATE_GRAD_BATCHES=16 sbatch train_joint_levels.sh
+#   TRAIN_RUN_NAME=hi_lewm_joint_custom sbatch train_joint_levels.sh
+#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch train_joint_levels.sh
 
 #SBATCH --partition=gpu_a100
 #SBATCH --constraint=scratch-node
 #SBATCH --gpus=1
-#SBATCH --job-name=hi_l2_pusht_train_hope1
+#SBATCH --job-name=hi_joint_pusht_train
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=10:00:00
-#SBATCH --output=train_hope1_%j.out
-#SBATCH --error=train_hope1_%j.err
+#SBATCH --time=24:00:00
+#SBATCH --output=train_joint_levels_%j.out
+#SBATCH --error=train_joint_levels_%j.err
 
 set -euo pipefail
 
@@ -94,23 +104,30 @@ if [[ -f "${WANDB_ENV_FILE}" ]]; then
 fi
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
   echo "ERROR: WANDB_API_KEY is not set." >&2
-  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> train_hope1.sh" >&2
+  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> train_joint_levels.sh" >&2
   exit 2
 fi
 wandb login --relogin "${WANDB_API_KEY}"
 
 WANDB_ENTITY_OVERRIDE="${WANDB_ENTITY:-null}"
 WANDB_PROJECT="${WANDB_PROJECT:-hi_lewm}"
+echo "W&B entity: ${WANDB_ENTITY_OVERRIDE}"
+echo "W&B project: ${WANDB_PROJECT}"
 
 ######################################## TRAIN SETUP #######################################
 
 SCRATCH_STABLEWM_HOME="${SCRATCH_STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 DATASET_FILE="${DATASET_FILE:-pusht_expert_train.h5}"
 CKPT_REL="${CKPT_REL:-pusht/lewm_object.ckpt}"
-MAX_EPOCHS="${MAX_EPOCHS:-10}"
-LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-192}"
-TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_p2_train_hope1_${SLURM_JOB_ID:-manual}}"
-WANDB_RUN_ID="${WANDB_RUN_ID:-run_${SLURM_JOB_ID:-manual}}"
+MAX_EPOCHS="${MAX_EPOCHS:-50}"
+LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-32}"
+OPTIMIZER_LR="${OPTIMIZER_LR:-5e-5}"
+SIGREG_WEIGHT="${SIGREG_WEIGHT:-0.2}"
+BATCH_SIZE="${BATCH_SIZE:-16}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-8}"
+TRAINER_PRECISION="${TRAINER_PRECISION:-bf16-mixed}"
+TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_joint_${SLURM_JOB_ID:-manual}}"
+WANDB_RUN_ID="${WANDB_RUN_ID:-${TRAIN_RUN_NAME}}"
 
 SRC_DATASET="${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}"
 SRC_CKPT="${SCRATCH_STABLEWM_HOME}/${CKPT_REL}"
@@ -130,6 +147,7 @@ PERSIST_RUN_DIR="${PERSIST_RUN_DIR:-${SCRATCH_STABLEWM_HOME}/runs/${TRAIN_RUN_NA
 
 # Read data/checkpoint from local scratch for speed.
 export STABLEWM_HOME="${LOCAL_STABLEWM_HOME}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 echo "Repo root: ${REPO_ROOT}"
 echo "Scratch home: ${SCRATCH_STABLEWM_HOME}"
@@ -143,7 +161,14 @@ echo "Run name: ${TRAIN_RUN_NAME}"
 echo "W&B run id: ${WANDB_RUN_ID}"
 echo "Max epochs: ${MAX_EPOCHS}"
 echo "Latent action dim: ${LATENT_ACTION_DIM}"
-echo "Early stopping: disabled (no early stopping callback configured)."
+echo "Optimizer lr: ${OPTIMIZER_LR}"
+echo "SIGReg weight: ${SIGREG_WEIGHT}"
+echo "Micro-batch size: ${BATCH_SIZE}"
+echo "Gradient accumulation: ${ACCUMULATE_GRAD_BATCHES}"
+echo "Trainer precision: ${TRAINER_PRECISION}"
+echo "PYTORCH_CUDA_ALLOC_CONF: ${PYTORCH_CUDA_ALLOC_CONF}"
+echo "Joint losses: alpha=1.0 beta=1.0"
+echo "Checkpointing: per-epoch object dumps and per-epoch training-state checkpoints enabled."
 
 echo ""
 echo "==> Preparing node-local copy in ${LOCAL_STABLEWM_HOME}"
@@ -162,19 +187,27 @@ CMD=(
   wandb.config.project="${WANDB_PROJECT}"
   wandb.config.id="${WANDB_RUN_ID}"
   trainer.max_epochs="${MAX_EPOCHS}"
+  trainer.precision="${TRAINER_PRECISION}"
+  +trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}"
+  loader.batch_size="${BATCH_SIZE}"
+  optimizer.lr="${OPTIMIZER_LR}"
   wm.high_level.latent_action_dim="${LATENT_ACTION_DIM}"
-  training.train_low_level=False
+  training.train_low_level=True
   pretrained_low_level.enabled=True
   pretrained_low_level.checkpoint.selection_mode=explicit_path
   pretrained_low_level.checkpoint.path="${LOCAL_CKPT}"
-  pretrained_low_level.freeze.encoder=True
-  pretrained_low_level.freeze.low_level_predictor=True
-  pretrained_low_level.freeze.low_level_action_encoder=True
-  pretrained_low_level.freeze.projector=True
-  pretrained_low_level.freeze.low_pred_proj=True
+  pretrained_low_level.freeze.encoder=False
+  pretrained_low_level.freeze.low_level_predictor=False
+  pretrained_low_level.freeze.low_level_action_encoder=False
+  pretrained_low_level.freeze.projector=False
+  pretrained_low_level.freeze.low_pred_proj=False
   pretrained_low_level.freeze.high_pred_proj=False
-  loss.alpha=0.0
+  loss.alpha=1.0
   loss.beta=1.0
+  loss.sigreg.weight="${SIGREG_WEIGHT}"
+  checkpointing.object_dump.epoch_interval=1
+  checkpointing.weights_dump.enabled=True
+  checkpointing.weights_dump.epoch_interval=1
 )
 
 echo ""

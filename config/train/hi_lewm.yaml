@@ -116,3 +116,6 @@ loss:
 checkpointing:
   object_dump:
     epoch_interval: 1
+  weights_dump:
+    enabled: True
+    epoch_interval: 1

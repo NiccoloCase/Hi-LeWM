@@ -6,23 +6,27 @@
 #
 # Usage:
 #   cd jobs/train/pusht
-#   sbatch train_hope1.sh
+#   sbatch train_hope2.sh
+#
+# Default configuration:
+#   - MAX_EPOCHS=15
+#   - LATENT_ACTION_DIM=32
 #
 # Optional overrides:
-#   MAX_EPOCHS=10 sbatch train_hope1.sh
-#   LATENT_ACTION_DIM=64 sbatch train_hope1.sh
-#   TRAIN_RUN_NAME=hi_lewm_p2_train_hope1_custom sbatch train_hope1.sh
-#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch train_hope1.sh
+#   MAX_EPOCHS=15 sbatch train_hope2.sh
+#   LATENT_ACTION_DIM=32 sbatch train_hope2.sh
+#   TRAIN_RUN_NAME=hi_lewm_p2_train_hope2_custom sbatch train_hope2.sh
+#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch train_hope2.sh
 
 #SBATCH --partition=gpu_a100
 #SBATCH --constraint=scratch-node
 #SBATCH --gpus=1
-#SBATCH --job-name=hi_l2_pusht_train_hope1
+#SBATCH --job-name=hi_l2_pusht_train_hope2
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=10:00:00
-#SBATCH --output=train_hope1_%j.out
-#SBATCH --error=train_hope1_%j.err
+#SBATCH --output=train_hope2_%j.out
+#SBATCH --error=train_hope2_%j.err
 
 set -euo pipefail
 
@@ -94,7 +98,7 @@ if [[ -f "${WANDB_ENV_FILE}" ]]; then
 fi
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
   echo "ERROR: WANDB_API_KEY is not set." >&2
-  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> train_hope1.sh" >&2
+  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> train_hope2.sh" >&2
   exit 2
 fi
 wandb login --relogin "${WANDB_API_KEY}"
@@ -107,9 +111,9 @@ WANDB_PROJECT="${WANDB_PROJECT:-hi_lewm}"
 SCRATCH_STABLEWM_HOME="${SCRATCH_STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 DATASET_FILE="${DATASET_FILE:-pusht_expert_train.h5}"
 CKPT_REL="${CKPT_REL:-pusht/lewm_object.ckpt}"
-MAX_EPOCHS="${MAX_EPOCHS:-10}"
-LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-192}"
-TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_p2_train_hope1_${SLURM_JOB_ID:-manual}}"
+MAX_EPOCHS="${MAX_EPOCHS:-15}"
+LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-32}"
+TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_p2_train_hope2_${SLURM_JOB_ID:-manual}}"
 WANDB_RUN_ID="${WANDB_RUN_ID:-run_${SLURM_JOB_ID:-manual}}"
 
 SRC_DATASET="${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}"

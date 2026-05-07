@@ -14,6 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 import stable_worldmodel as swm
+import baseline_adapter as _baseline_adapter
 
 
 # LeWM checkpoints were serialized with classes from a top-level `jepa` module.
@@ -22,6 +23,13 @@ import stable_worldmodel as swm
 _VENDORED_LEWM_DIR = Path(__file__).resolve().parent / "third_party" / "lewm"
 if _VENDORED_LEWM_DIR.is_dir():
     sys.path.insert(0, str(_VENDORED_LEWM_DIR))
+
+# Backward-compatibility for object checkpoints saved by `hi_train.py`:
+# those pickles may reference classes under the dynamic module name
+# `_baseline_lewm_module` created by baseline_adapter.
+# Touch one exported symbol so that module alias is registered in sys.modules
+# before AutoCostModel calls torch.load.
+_ = _baseline_adapter.ARPredictor
 
 
 def img_transform(cfg):
@@ -55,6 +63,29 @@ def get_dataset(cfg, dataset_name):
         cache_dir=dataset_path,
     )
     return dataset
+
+
+def resolve_output_dir(cfg: DictConfig) -> Path:
+    base_dir = (
+        Path(swm.data.utils.get_cache_dir(), cfg.policy).parent
+        if cfg.policy != "random"
+        else Path(__file__).parent
+    )
+
+    output_cfg = cfg.get("output")
+    if output_cfg is None:
+        return base_dir
+
+    output_subdir = str(output_cfg.get("subdir", "")).strip()
+    if output_subdir:
+        subdir = Path(output_subdir)
+        if subdir.is_absolute() or ".." in subdir.parts:
+            raise ValueError(
+                "output.subdir must be a relative path without '..' segments."
+            )
+        base_dir = base_dir / subdir
+
+    return base_dir
 
 
 def format_episode_outcomes(eval_episodes, eval_start_idx, episode_successes):
@@ -120,11 +151,7 @@ def run(cfg: DictConfig):
     else:
         policy = swm.policy.RandomPolicy()
 
-    output_root = (
-        Path(swm.data.utils.get_cache_dir(), cfg.policy).parent
-        if cfg.policy != "random"
-        else Path(__file__).parent
-    )
+    output_root = resolve_output_dir(cfg)
 
     episode_len = get_episodes_length(dataset, ep_indices)
     max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1

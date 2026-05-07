@@ -6,23 +6,34 @@
 #
 # Usage:
 #   cd jobs/train/pusht
-#   sbatch train_hope1.sh
+#   sbatch train_latent_action_dim_8_stride_5_n4.sh
+#
+# Default configuration:
+#   - MAX_EPOCHS=15
+#   - LATENT_ACTION_DIM=8
+#   - WAYPOINT_NUM=4
+#   - WAYPOINT_STRIDE=5
+#
+# Notes:
+#   - Keeps the default training max_span=15 unchanged.
+#   - Uses fixed_stride waypoints with total span (WAYPOINT_NUM - 1) * WAYPOINT_STRIDE = 15.
 #
 # Optional overrides:
-#   MAX_EPOCHS=10 sbatch train_hope1.sh
-#   LATENT_ACTION_DIM=64 sbatch train_hope1.sh
-#   TRAIN_RUN_NAME=hi_lewm_p2_train_hope1_custom sbatch train_hope1.sh
-#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch train_hope1.sh
+#   MAX_EPOCHS=15 sbatch train_latent_action_dim_8_stride_5_n4.sh
+#   LATENT_ACTION_DIM=8 sbatch train_latent_action_dim_8_stride_5_n4.sh
+#   WAYPOINT_NUM=4 WAYPOINT_STRIDE=5 sbatch train_latent_action_dim_8_stride_5_n4.sh
+#   TRAIN_RUN_NAME=hi_lewm_p2_train_latent_action_dim_8_stride_5_n4_custom sbatch train_latent_action_dim_8_stride_5_n4.sh
+#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch train_latent_action_dim_8_stride_5_n4.sh
 
 #SBATCH --partition=gpu_a100
 #SBATCH --constraint=scratch-node
 #SBATCH --gpus=1
-#SBATCH --job-name=hi_l2_pusht_train_hope1
+#SBATCH --job-name=hi_l2_pusht_train_latent_action_dim_8_stride_5_n4
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=10:00:00
-#SBATCH --output=train_hope1_%j.out
-#SBATCH --error=train_hope1_%j.err
+#SBATCH --output=train_latent_action_dim_8_stride_5_n4_%j.out
+#SBATCH --error=train_latent_action_dim_8_stride_5_n4_%j.err
 
 set -euo pipefail
 
@@ -94,7 +105,7 @@ if [[ -f "${WANDB_ENV_FILE}" ]]; then
 fi
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
   echo "ERROR: WANDB_API_KEY is not set." >&2
-  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> train_hope1.sh" >&2
+  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> train_latent_action_dim_8_stride_5_n4.sh" >&2
   exit 2
 fi
 wandb login --relogin "${WANDB_API_KEY}"
@@ -107,9 +118,11 @@ WANDB_PROJECT="${WANDB_PROJECT:-hi_lewm}"
 SCRATCH_STABLEWM_HOME="${SCRATCH_STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 DATASET_FILE="${DATASET_FILE:-pusht_expert_train.h5}"
 CKPT_REL="${CKPT_REL:-pusht/lewm_object.ckpt}"
-MAX_EPOCHS="${MAX_EPOCHS:-10}"
-LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-192}"
-TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_p2_train_hope1_${SLURM_JOB_ID:-manual}}"
+MAX_EPOCHS="${MAX_EPOCHS:-15}"
+LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-8}"
+WAYPOINT_NUM="${WAYPOINT_NUM:-4}"
+WAYPOINT_STRIDE="${WAYPOINT_STRIDE:-5}"
+TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_p2_train_latent_action_dim_8_stride_5_n4_${SLURM_JOB_ID:-manual}}"
 WANDB_RUN_ID="${WANDB_RUN_ID:-run_${SLURM_JOB_ID:-manual}}"
 
 SRC_DATASET="${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}"
@@ -143,6 +156,10 @@ echo "Run name: ${TRAIN_RUN_NAME}"
 echo "W&B run id: ${WANDB_RUN_ID}"
 echo "Max epochs: ${MAX_EPOCHS}"
 echo "Latent action dim: ${LATENT_ACTION_DIM}"
+echo "Waypoint num: ${WAYPOINT_NUM}"
+echo "Waypoint strategy: fixed_stride"
+echo "Waypoint stride: ${WAYPOINT_STRIDE}"
+echo "Expected waypoint span: $(( (WAYPOINT_NUM - 1) * WAYPOINT_STRIDE ))"
 echo "Early stopping: disabled (no early stopping callback configured)."
 
 echo ""
@@ -163,6 +180,9 @@ CMD=(
   wandb.config.id="${WANDB_RUN_ID}"
   trainer.max_epochs="${MAX_EPOCHS}"
   wm.high_level.latent_action_dim="${LATENT_ACTION_DIM}"
+  wm.high_level.waypoints.num="${WAYPOINT_NUM}"
+  wm.high_level.waypoints.strategy=fixed_stride
+  wm.high_level.waypoints.stride="${WAYPOINT_STRIDE}"
   training.train_low_level=False
   pretrained_low_level.enabled=True
   pretrained_low_level.checkpoint.selection_mode=explicit_path

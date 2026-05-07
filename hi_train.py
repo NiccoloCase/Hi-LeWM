@@ -12,6 +12,7 @@ import lightning as pl
 import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
+from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 from torch.utils.data import default_collate
@@ -578,6 +579,32 @@ def log_param_breakdown(model: HiJEPA):
     )
 
 
+class WeightsCheckpointCallback(Callback):
+    """Save full Lightning checkpoints at a fixed epoch interval."""
+
+    def __init__(self, dirpath: Path, filename: str, epoch_interval: int = 1):
+        super().__init__()
+        if epoch_interval <= 0:
+            raise ValueError("epoch_interval must be > 0")
+        self.dirpath = Path(dirpath)
+        self.filename = filename
+        self.epoch_interval = int(epoch_interval)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        super().on_train_epoch_end(trainer, pl_module)
+        if not trainer.is_global_zero:
+            return
+
+        epoch = int(trainer.current_epoch) + 1
+        if epoch % self.epoch_interval != 0 and epoch != int(trainer.max_epochs):
+            return
+
+        output_path = self.dirpath / f"{self.filename}_epoch_{epoch}_weights.ckpt"
+        trainer.save_checkpoint(str(output_path))
+        latest_path = self.dirpath / f"{self.filename}_weights.ckpt"
+        trainer.save_checkpoint(str(latest_path))
+
+
 def validate_high_level_config(cfg):
     """Validate high-level config consistency before model construction."""
     history_size = int(cfg.wm.history_size)
@@ -870,9 +897,19 @@ def run(cfg):
         epoch_interval=int(cfg.checkpointing.object_dump.epoch_interval),
     )
 
+    callbacks = [object_dump_callback]
+    if bool(cfg.checkpointing.weights_dump.enabled):
+        callbacks.append(
+            WeightsCheckpointCallback(
+                dirpath=run_dir,
+                filename=cfg.output_model_name,
+                epoch_interval=int(cfg.checkpointing.weights_dump.epoch_interval),
+            )
+        )
+
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback],
+        callbacks=callbacks,
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,
