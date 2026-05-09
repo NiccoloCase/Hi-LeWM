@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from hi_jepa import HiJEPA
-from hi_policy import HierarchicalWorldModelPolicy, calibrate_latent_prior
+from hi_policy import HierarchicalWorldModelPolicy, StagedHierarchicalWorldModelPolicy, calibrate_latent_prior
 
 
 class _EncOut:
@@ -434,3 +434,44 @@ def test_hierarchical_policy_replans_high_and_warm_starts_low():
     # warm-start applied on second low solve
     assert low_solver.calls[0]["init_action"] is None
     assert low_solver.calls[1]["init_action"] is not None
+
+
+def test_staged_hierarchical_policy_uses_full_initial_high_plan():
+    model = FakePolicyModel(dim=3)
+    high_solver = FakeSolver()
+    low_solver = FakeSolver()
+    high_cfg = DummyPlanConfig(horizon=2, receding_horizon=1, action_block=1, warm_start=True)
+    low_cfg = DummyPlanConfig(horizon=1, receding_horizon=1, action_block=1, warm_start=True)
+
+    policy = StagedHierarchicalWorldModelPolicy(
+        model=model,
+        high_solver=high_solver,
+        low_solver=low_solver,
+        high_config=high_cfg,
+        low_config=low_cfg,
+        stage_duration_steps=2,
+        process={},
+        transform={},
+    )
+    env = DummyEnv(num_envs=1, action_dim=3)
+    policy.set_env(env)
+
+    info = {
+        "pixels": np.zeros((1, 1, 8, 8, 3), dtype=np.float32),
+        "goal": np.zeros((1, 1, 8, 8, 3), dtype=np.float32),
+    }
+
+    actions = [policy.get_action(info) for _ in range(5)]
+    assert all(action.shape == (1, 3) for action in actions)
+
+    assert len(high_solver.calls) == 1
+    assert len(low_solver.calls) == 5
+
+    first_target = low_solver.calls[0]["info"]["z_subgoal"]
+    second_target = low_solver.calls[1]["info"]["z_subgoal"]
+    later_targets = [call["info"]["z_subgoal"] for call in low_solver.calls[2:]]
+
+    assert torch.allclose(first_target, torch.ones_like(first_target))
+    assert torch.allclose(second_target, torch.ones_like(second_target))
+    for target in later_targets:
+        assert torch.allclose(target, torch.full_like(first_target, 2.0))

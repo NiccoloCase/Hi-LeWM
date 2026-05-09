@@ -6,6 +6,7 @@ Hierarchical PushT evaluation jobs, organized by goal offset and experiment type
 
 - `d25/`: short-horizon eval jobs (`eval.goal_offset_steps=25`).
 - `d50/`: medium-horizon eval jobs (`eval.goal_offset_steps=50`), including sweep submit helpers.
+- `matrix/`: array-driven eval suites with checkpoint lists and hardcoded config matrices.
 - `old_slurms/`: archived historical run outputs grouped by offset (`d25/`, `d50/`).
 - `EVAL_CONFIG_GUIDE.md`: notes on key eval config knobs.
 - `PLANNING_HPARAM_RESULTS.md`: planning hyperparameter observations.
@@ -39,6 +40,23 @@ Hierarchical PushT evaluation jobs, organized by goal offset and experiment type
 - `submit_d50_cpu_overnight_sweep.sh`
 - `d50/legacy/`: historical wrapper scripts retained for reference.
 - `d50/sweeps/`: per-sweep local runtime output directories.
+
+## Matrix jobs
+
+- `matrix/eval_fixed_stride_matrix.sh`
+  - Array job over checkpoint rows from `matrix/checkpoints_fixed_stride.txt`
+  - Hardcodes the current 7-way fixed-stride eval suite:
+    - `d25, hh1, lh2, lrh1`
+    - `d25, hh1, lh5, lrh1`
+    - `d25, hh2, lh2, lrh1`
+    - `d50, hh1, lh2, lrh1`
+    - `d50, hh2, lh2, lrh1`
+    - `d50, hh2, lh5, lrh1`
+    - `d50, hh2, lh5, lrh5`
+- `matrix/submit_fixed_stride_matrix.sh`
+  - Convenience submit helper for the fixed-stride matrix
+  - Submits one 7-task array per checkpoint row automatically
+  - Writes Slurm `.out/.err` files under `matrix/logs/<RUN_NAME>/`
 
 ## Artifact policy
 

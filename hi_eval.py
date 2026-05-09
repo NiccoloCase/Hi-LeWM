@@ -15,7 +15,11 @@ from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 
 import baseline_adapter as _baseline_adapter
-from hi_policy import HierarchicalWorldModelPolicy, calibrate_latent_prior
+from hi_policy import (
+    HierarchicalWorldModelPolicy,
+    StagedHierarchicalWorldModelPolicy,
+    calibrate_latent_prior,
+)
 
 os.environ["MUJOCO_GL"] = "egl"
 
@@ -288,9 +292,10 @@ def build_policy(cfg, model, dataset, process, transform):
             transform=transform,
         )
 
-    if mode != "hierarchical":
+    if mode not in {"hierarchical", "hierarchical_staged"}:
         raise ValueError(
-            f"Unsupported planning.mode='{mode}'. Use one of: hierarchical, flat."
+            "Unsupported planning.mode='{}'. Use one of: hierarchical, "
+            "hierarchical_staged, flat.".format(mode)
         )
 
     high_cfg = swm.policy.PlanConfig(**cfg.planning.high.plan_config)
@@ -312,12 +317,53 @@ def build_policy(cfg, model, dataset, process, transform):
             f"(chunks={int(high_bounds['num_chunks'])}, chunk_len={int(high_bounds['chunk_len'])})"
         )
 
-    return HierarchicalWorldModelPolicy(
+    if mode == "hierarchical":
+        return HierarchicalWorldModelPolicy(
+            model=model,
+            high_solver=high_solver,
+            low_solver=low_solver,
+            high_config=high_cfg,
+            low_config=low_cfg,
+            macro_replan_interval=int(cfg.planning.high.replan_interval),
+            process=process,
+            transform=transform,
+            high_latent_bounds=high_bounds,
+        )
+
+    staged_cfg = cfg.planning.get("staged", None)
+    num_stage_targets = int(high_cfg.horizon) * int(high_cfg.action_block)
+    if num_stage_targets < 2:
+        raise ValueError(
+            "hierarchical_staged requires at least two staged high-level targets; "
+            f"got horizon={int(high_cfg.horizon)}, action_block={int(high_cfg.action_block)}"
+        )
+
+    stage_duration_cfg = None
+    clear_low_buffer = True
+    if staged_cfg is not None:
+        stage_duration_cfg = staged_cfg.get("stage_duration_steps", None)
+        clear_low_buffer = bool(staged_cfg.get("clear_low_buffer_on_stage_change", True))
+
+    if stage_duration_cfg is None:
+        stage_duration_steps = int(np.ceil(int(cfg.eval.goal_offset_steps) / num_stage_targets))
+    else:
+        stage_duration_steps = int(stage_duration_cfg)
+
+    print(
+        "[hi_eval] staged high-level plan "
+        f"(num_stage_targets={num_stage_targets}, "
+        f"stage_duration_steps={stage_duration_steps}, "
+        f"clear_low_buffer_on_stage_change={clear_low_buffer})"
+    )
+
+    return StagedHierarchicalWorldModelPolicy(
         model=model,
         high_solver=high_solver,
         low_solver=low_solver,
         high_config=high_cfg,
         low_config=low_cfg,
+        stage_duration_steps=stage_duration_steps,
+        clear_low_buffer_on_stage_change=clear_low_buffer,
         macro_replan_interval=int(cfg.planning.high.replan_interval),
         process=process,
         transform=transform,
@@ -329,7 +375,7 @@ def build_policy(cfg, model, dataset, process, transform):
 def run(cfg: DictConfig):
     mode = str(cfg.planning.get("mode", "hierarchical")).lower()
 
-    if mode == "hierarchical":
+    if mode in {"hierarchical", "hierarchical_staged"}:
         high_plan_len = (
             int(cfg.planning.high.plan_config.horizon)
             * int(cfg.planning.high.plan_config.action_block)
@@ -365,8 +411,22 @@ def run(cfg: DictConfig):
 
     policy_name = cfg.get("policy", "random")
     if policy_name != "random":
+        if mode in {"hierarchical", "hierarchical_staged"}:
+            model_devices = {
+                str(cfg.planning.high.solver.device),
+                str(cfg.planning.low.solver.device),
+            }
+            if len(model_devices) != 1:
+                raise ValueError(
+                    "Hierarchical eval requires high/low solver devices to match so the "
+                    f"loaded policy model can live on one device, got {sorted(model_devices)}"
+                )
+            model_device = model_devices.pop()
+        else:
+            model_device = str(cfg.solver.device)
+
         model = swm.policy.AutoCostModel(cfg.policy)
-        model = model.to("cuda")
+        model = model.to(model_device)
         model = model.eval()
         model.requires_grad_(False)
         model.interpolate_pos_encoding = True

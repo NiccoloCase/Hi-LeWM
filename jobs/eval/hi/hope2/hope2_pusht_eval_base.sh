@@ -41,23 +41,23 @@ print_video_group() {
 }
 
 resolve_repo_root() {
-  local c p
+  local script_dir c p level
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
   for c in \
+    "${script_dir}" \
     "${PROJECT_ROOT:-}" \
     "${SLURM_SUBMIT_DIR:-}" \
-    "${PWD:-}" \
-    "${HOME}/h-le-wm" \
-    "${HOME}/h-lewm" \
-    "/gpfs/home2/${USER}/h-le-wm" \
-    "/gpfs/home2/${USER}/h-lewm"; do
+    "${PWD:-}"; do
     [[ -z "${c}" ]] && continue
-    for p in "${c}" "${c}/.." "${c}/../.." "${c}/../../.."; do
+    p="${c}"
+    for level in 0 1 2 3 4 5 6; do
       if p="$(cd "${p}" >/dev/null 2>&1 && pwd)"; then
         if [[ -f "${p}/hi_eval.py" && -f "${p}/config/eval/hi_pusht.yaml" ]]; then
           echo "${p}"
           return 0
         fi
       fi
+      p="${p}/.."
     done
   done
   return 1
@@ -65,7 +65,7 @@ resolve_repo_root() {
 
 if ! REPO_ROOT="$(resolve_repo_root)"; then
   echo "ERROR: Could not locate repo root." >&2
-  echo "Submit from repo root or pass PROJECT_ROOT=/path/to/h-le-wm" >&2
+  echo "Pass PROJECT_ROOT=/path/to/repo-root or submit from inside the repo." >&2
   exit 2
 fi
 
