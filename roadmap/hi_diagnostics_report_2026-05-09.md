@@ -181,8 +181,8 @@ Useful norm ratios, `selected_mean_norm / dataset_mean_norm`:
 | Model | d25 hh1 | d25 hh2 step1 | d25 hh2 step2 | d50 hh1 | d50 hh2 step1 | d50 hh2 step2 |
 |---|---:|---:|---:|---:|---:|---:|
 | hope2 | 1.1552 | 1.0553 | 1.1076 | 1.2841 | 1.1416 | 1.1275 |
-| latent8 | 1.0494 | 1.0388 | 0.9618 | 1.5793 | 1.0921 | 0.9883 |
-| latent32 | 1.1766 | 1.1273 | 1.1227 | 1.6704 | 1.1732 | 1.1341 |
+| latent8 | 1.0494 | 1.0388 | 0.9618 | 1.5795 | 1.0921 | 0.9883 |
+| latent32 | 1.1765 | 1.1273 | 1.1220 | 1.6704 | 1.1732 | 1.1348 |
 
 ### Interpretation
 
@@ -594,3 +594,426 @@ The most likely failure point is therefore the online hierarchical control loop:
 2. The diagnostics do support the theory that long single macro-actions are structurally poor and go off-manifold.
 3. The diagnostics support using split high-level horizons over one long macro, at least in terms of subgoal plausibility and reachability.
 4. The remaining gap between better offline subgoal quality and weaker final online performance points to instability in online hierarchical execution rather than a failure of the low-level planner in isolation.
+
+
+## Acting Diagnostics Addendum
+
+Date: 2026-05-10
+
+### Scope
+
+This addendum summarizes the online acting diagnostics run from `jobs/eval/hi/acting_diagnostics/`.
+
+Completed job arrays:
+
+- `22613333` for `hi_lewm_p2_train_hope2_22253175`
+- `22613335` for `hi_lewm_p2_train_latent_action_dim_32_stride_5_n4_22569364`
+
+Completion status:
+
+- all `24/24` acting-diagnostic tasks finished
+- `squeue -j 22613333,22613335` is empty
+- all task `.out` logs contain `Acting diagnostic finished.`
+- no `Traceback` or runtime `Exception` markers were found in the final logs
+- `.err` logs contain only the expected module / pygame / gymnasium / torch warnings
+
+Primary summary files:
+
+- [summary_oracle_subgoal_acting.tsv](/home/scur0200/main/jobs/eval/hi/acting_diagnostics/logs/summary_oracle_subgoal_acting.tsv)
+- [summary_low_level_reality_gap.tsv](/home/scur0200/main/jobs/eval/hi/acting_diagnostics/logs/summary_low_level_reality_gap.tsv)
+- [summary_generated_subgoal_acting.tsv](/home/scur0200/main/jobs/eval/hi/acting_diagnostics/logs/summary_generated_subgoal_acting.tsv)
+- [summary_online_hierarchical_logging.tsv](/home/scur0200/main/jobs/eval/hi/acting_diagnostics/logs/summary_online_hierarchical_logging.tsv)
+
+Model shorthand used below:
+
+- `hope2` = `hi_lewm_p2_train_hope2_22253175`
+- `latent32` = `hi_lewm_p2_train_latent_action_dim_32_stride_5_n4_22569364`
+
+Important note about the summary files:
+
+- `summary_oracle_subgoal_acting.tsv` contains a few earlier smoke-test rows at `goal_offset_steps=10` and `25`
+- the real phase-1 production rows for this addendum are the `goal_offset_steps=50` rows
+
+### Shared Acting-Diagnostic Settings
+
+These settings were shared across the acting diagnostics unless noted otherwise.
+
+#### Data, environment, and checkpoints
+
+- dataset name: `pusht_expert_train`
+- checkpoint families evaluated:
+  - `hi_lewm_p2_train_hope2_22253175_epoch_15`
+  - `hi_lewm_p2_train_latent_action_dim_32_stride_5_n4_22569364_epoch_15`
+- environment: real `swm/PushT-v1` environment via `stable_worldmodel.World`
+- eval config: `config/eval/hi_pusht.yaml`
+- environment reset and goal-setting followed the same dataset-conditioned mechanism used by `hi_eval.py`
+- image size for latent encoding: `224`
+- cache root: `${STABLEWM_HOME}`
+
+#### Shared evaluation protocol
+
+- production goal distance: `d50`, meaning `goal_offset_steps = 50`
+- `frame_skip = 5`
+- therefore `d50 -> 10` high-level tokens
+- `num_eval = 50` online episodes per row
+- `seed = 42`
+- device: CPU
+- Slurm resources per task:
+  - `cpus-per-task = 8`
+  - `gpus = 0`
+  - `time limit = 08:00:00`
+
+#### Token partitions and stage structure
+
+For `d50`:
+
+- `hh1 -> [10]` high-level tokens
+- `hh2 -> [5, 5]` high-level tokens
+
+For staged or oracle two-stage acting:
+
+- stage 1 duration = `25` env steps
+- stage 2 duration = `25` env steps
+- stage 1 oracle target = true future latent at `t + 25`
+- stage 2 oracle target = true final latent at `t + 50`
+
+#### Planner budgets
+
+All production rows used:
+
+- high-level CEM: `1500` samples, `40` iterations, `topk = 10`
+- low-level CEM: `900` samples, `20` iterations, `topk = 150`
+
+#### Online metrics added by the acting suite
+
+Compared with the offline diagnostics, these acting experiments added real environment execution and logged:
+
+- actual stage-end latent error after env execution
+- predicted model terminal error before execution
+- reality gap: `actual_error - model_error`
+- real progress toward the final goal latent
+- nearest same-trajectory future offset for generated subgoals
+- offset error relative to the expected stage timing
+- online subgoal churn during hierarchical replanning
+- selected low-level action OOD summaries during execution blocks
+
+### Acting Experiment 1: Oracle Subgoal Acting
+
+#### What this experiment was about
+
+This is the online acting analogue of the midpoint-subgoal test.
+
+The experiment resets the environment to a true dataset state at time `t`, then gives the controller oracle stage targets:
+
+- stage 1 target = true future latent at `t + 25`
+- stage 2 target = true future latent at `t + 50`
+
+The high level is not asked to generate subgoals. The low level only has to execute known-good intermediate waypoints in the real environment.
+
+#### Hypothesis
+
+If the low-level online executor is fundamentally capable, then oracle intermediate subgoals should work well online. If oracle subgoals fail badly, then the problem is in the low-level online controller rather than the high-level generator.
+
+#### Expectation
+
+The expected ranking before this experiment was:
+
+- `lh2` should work well
+- `lh3` might also work
+- `lh5` was uncertain, because offline planning had liked longer horizons but online results had not
+
+#### Detailed settings
+
+Configuration sweep per model:
+
+- `d50, hh2, lh2, lrh1`
+- `d50, hh2, lh3, lrh1`
+- `d50, hh2, lh5, lrh1`
+
+Operational details:
+
+- the environment was reset from dataset state using the same per-episode dataset reset mechanism as `hi_eval.py`
+- stage durations were explicitly set to `[25, 25]` env steps
+- the low-level planner executed in closed loop inside the real environment
+- after each low-level execution block, the actual observation was re-encoded to compute true achieved latent error
+
+#### Actual results
+
+Success rate:
+
+| Model | `lh2/lrh1` | `lh3/lrh1` | `lh5/lrh1` |
+|---|---:|---:|---:|
+| hope2 | 70.0 | 48.0 | 24.0 |
+| latent32 | 74.0 | 48.0 | 24.0 |
+
+Stage 1 and final stage terminal latent error:
+
+| Model | Setting | Stage 1 Error | Final Error | Goal Progress | Reality Gap |
+|---|---|---:|---:|---:|---:|
+| hope2 | `lh2/lrh1` | 0.1357 | 0.3225 | 1.4296 | 0.0476 |
+| latent32 | `lh2/lrh1` | 0.1202 | 0.3062 | 1.4459 | 0.0455 |
+| hope2 | `lh3/lrh1` | 0.2088 | 0.3006 | 1.4515 | 0.0327 |
+| latent32 | `lh3/lrh1` | 0.2113 | 0.3406 | 1.4115 | 0.0368 |
+| hope2 | `lh5/lrh1` | 0.4125 | 0.5938 | 1.1582 | 0.0600 |
+| latent32 | `lh5/lrh1` | 0.4058 | 0.5918 | 1.1603 | 0.0610 |
+
+#### Interpretation
+
+- Oracle midpoint subgoals do work online.
+- The best setting is clearly `lh2`, not `lh5`.
+- `lh3` already drops substantially.
+- `lh5` collapses badly online for both models.
+- This means the low-level online executor is capable in principle, but only under shorter low-level horizons.
+- The failure of `hh2` in normal online evaluation is therefore not because midpoint control is impossible.
+
+### Acting Experiment 2: Low-Level Reality Gap
+
+#### What this experiment was about
+
+This is the online acting version of the dataset-subgoal reachability test.
+
+For real future dataset subgoals at offsets `+2`, `+3`, and `+5` high-level tokens, the low-level planner:
+
+- plans in the learned model
+- executes in the real environment
+- re-encodes the actual achieved state
+
+This directly measures the model-vs-reality gap for low-level plans.
+
+#### Hypothesis
+
+If low-level CEM is exploiting the model, then predicted terminal error should stay low while actual terminal error becomes much worse, especially for longer low-level horizons.
+
+#### Expectation
+
+The expectation before the acting version was:
+
+- `lh2` should likely remain strong
+- `lh5` might look optimistic in-model but fail online
+- the reality gap might widen for longer horizons
+
+#### Detailed settings
+
+Configuration sweep per model:
+
+- `d50, lh2, lrh1`
+- `d50, lh3, lrh1`
+- `d50, lh5, lrh1`
+
+Operational details:
+
+- real subgoals were taken from the same dataset trajectory at offsets `+2`, `+3`, and `+5` tokens
+- each offset was run from the same reset state, not from a previously mutated environment state
+- after each low-level block, actual achieved pixels were re-encoded and compared against the intended latent subgoal
+
+#### Actual results
+
+Overall actual terminal error and average reality gap:
+
+| Model | `lh2` Overall Error | `lh2` Gap | `lh3` Overall Error | `lh3` Gap | `lh5` Overall Error | `lh5` Gap |
+|---|---:|---:|---:|---:|---:|---:|
+| hope2 | 0.0862 | 0.0157 | 0.1468 | 0.0122 | 0.2999 | 0.0149 |
+| latent32 | 0.0863 | 0.0157 | 0.1471 | 0.0118 | 0.3041 | 0.0159 |
+
+Per-offset actual terminal error:
+
+| Model | `lh2`: off2 / off3 / off5 | `lh3`: off2 / off3 / off5 | `lh5`: off2 / off3 / off5 |
+|---|---|---|---|
+| hope2 | 0.0396 / 0.0677 / 0.1513 | 0.1507 / 0.1101 / 0.1796 | 0.2387 / 0.3015 / 0.3597 |
+| latent32 | 0.0399 / 0.0691 / 0.1498 | 0.1500 / 0.1142 / 0.1772 | 0.2389 / 0.3049 / 0.3684 |
+
+#### Interpretation
+
+- `lh2` is the strongest online low-level setting.
+- `lh3` is already worse.
+- `lh5` is much worse.
+- The reality gap is positive but small relative to the total error increase.
+- So the main online problem here is not a massive prediction-vs-reality blow-up. The larger problem is that longer low-level horizons are simply harder to execute well online.
+- This sharply disagrees with the offline planning-only reachability result, where `lh3/lh5` had looked better.
+
+### Acting Experiment 3: Generated-Subgoal Acting
+
+#### What this experiment was about
+
+This is the online acting version of generated-subgoal reachability.
+
+The high level generates subgoals, the low level executes toward them in the real environment, and the evaluation logs:
+
+- actual stage-end latent error
+- final latent error
+- success rate
+- nearest same-trajectory future offset of each generated subgoal
+- temporal offset error relative to the expected stage timing
+
+#### Hypothesis
+
+If the high-level generator is producing temporally wrong or control-invalid intermediate waypoints, then generated subgoals may look somewhat plausible but will line up with the wrong future time and underperform online.
+
+#### Expectation
+
+The expectation before the acting version was:
+
+- `hh2` should beat `hh1`
+- `hh2` step 1 should still be the most suspicious point
+- temporal offset logging should reveal whether the first subgoal is too early, too late, or otherwise misplaced
+
+#### Detailed settings
+
+Configuration sweep per model:
+
+- `d50, hh1, lh2, lrh1`
+- `d50, hh2, lh2, lrh1`
+
+Expected token offsets:
+
+- `hh1`: one generated target expected near token `+10`
+- `hh2`: stage 1 expected near token `+5`, stage 2 expected near token `+10`
+
+Operational details:
+
+- generated subgoals were produced by the high-level planner in the same policy stack used for online acting
+- each generated stage target was then tracked online by the low-level controller
+- the nearest same-trajectory future latent was computed, and the difference from the expected stage timing was reported as `offset_error_token_mean`
+
+#### Actual results
+
+Success rate and final terminal latent error:
+
+| Model | `hh1_lh2_lrh1` Success | `hh1` Final Error | `hh2_lh2_lrh1` Success | `hh2` Final Error |
+|---|---:|---:|---:|---:|
+| hope2 | 34.0 | 1.0035 | 44.0 | 0.8398 |
+| latent32 | 34.0 | 1.0040 | 42.0 | 0.8053 |
+
+Stage-level timing validity and stage-end error:
+
+| Model | Setting | Step 1 Offset Error | Step 1 Stage-End Error | Step 2 Offset Error | Step 2 Stage-End Error |
+|---|---|---:|---:|---:|---:|
+| hope2 | `hh1` | -2.4440 | 0.6227 |  |  |
+| latent32 | `hh1` | -2.2720 | 0.5903 |  |  |
+| hope2 | `hh2` | -1.0920 | 0.4269 | -0.6840 | 0.6420 |
+| latent32 | `hh2` | -1.1120 | 0.3870 | -0.2360 | 0.6676 |
+
+#### Interpretation
+
+- `hh2` is better than `hh1` online, but it is still not good.
+- Generated `hh2` subgoals improve success and final error relative to generated `hh1`.
+- The generated subgoals are still temporally wrong.
+- `hh1` first subgoal is strongly misaligned in time.
+- `hh2` reduces that timing error but does not remove it.
+- The first generated midpoint is still too early or otherwise not aligned with the true trajectory structure.
+- This supports the view that the high-level generator is producing intermediate waypoints that are not yet temporally valid enough for reliable online control.
+
+### Acting Experiment 4: Online Hierarchical Logging
+
+#### What this experiment was about
+
+This experiment runs the normal online hierarchical controller and logs behavior-level quantities during real execution, including:
+
+- average distance from current latent to current subgoal
+- average distance from current latent to final goal
+- average high-level subgoal churn across replans
+- average low-level model-vs-reality gap
+
+This is the closest acting experiment to the failure mode seen in the main evaluation matrix.
+
+#### Hypothesis
+
+If online failure is driven by replanning instability, then `hh2` should show larger subgoal churn than `hh1`, and the weaker settings should have worse success despite similar model-space optimism.
+
+#### Expectation
+
+The expected ranking was:
+
+- `hh1_lh2_lrh1` should be the strongest baseline
+- `hh2_lh2_lrh1` should likely show larger churn
+- `lh5` and especially `lrh5` were expected to be unstable online
+
+#### Detailed settings
+
+Configuration sweep per model:
+
+- `d50, hh1, lh2, lrh1`
+- `d50, hh2, lh2, lrh1`
+- `d50, hh2, lh5, lrh1`
+- `d50, hh2, lh5, lrh5`
+
+Operational details:
+
+- these are real online hierarchical runs, not staged runs
+- high-level replanning remained active
+- the diagnostic logs summarize means over the full acting trace rather than only final success
+
+#### Actual results
+
+Success rate:
+
+| Model | `hh1_lh2_lrh1` | `hh2_lh2_lrh1` | `hh2_lh5_lrh1` | `hh2_lh5_lrh5` |
+|---|---:|---:|---:|---:|
+| hope2 | 44.0 | 34.0 | 16.0 | 12.0 |
+| latent32 | 42.0 | 24.0 | 20.0 | 6.0 |
+
+Mean subgoal churn MSE:
+
+| Model | `hh1_lh2` | `hh2_lh2` | `hh2_lh5_lrh1` | `hh2_lh5_lrh5` |
+|---|---:|---:|---:|---:|
+| hope2 | 0.0634 | 0.3366 | 0.3622 | 0.3483 |
+| latent32 | 0.0611 | 0.3369 | 0.2530 | 0.2904 |
+
+Mean reality gap:
+
+| Model | `hh1_lh2` | `hh2_lh2` | `hh2_lh5_lrh1` | `hh2_lh5_lrh5` |
+|---|---:|---:|---:|---:|
+| hope2 | 0.1107 | 0.1170 | 0.0579 | 0.3793 |
+| latent32 | 0.1391 | 0.1112 | 0.0565 | 0.3816 |
+
+Mean distance to current subgoal and final goal:
+
+| Model | Setting | Mean Distance to Subgoal | Mean Distance to Final Goal | Final Terminal Latent Error |
+|---|---|---:|---:|---:|
+| hope2 | `hh1_lh2_lrh1` | 0.4933 | 1.9340 | 0.9031 |
+| latent32 | `hh1_lh2_lrh1` | 0.5060 | 1.9778 | 0.8281 |
+| hope2 | `hh2_lh2_lrh1` | 0.5013 | 1.9785 | 0.9003 |
+| latent32 | `hh2_lh2_lrh1` | 0.4791 | 1.9561 | 1.0430 |
+| hope2 | `hh2_lh5_lrh1` | 0.6422 | 1.9830 | 1.0534 |
+| latent32 | `hh2_lh5_lrh1` | 0.5518 | 2.0715 | 1.0048 |
+| hope2 | `hh2_lh5_lrh5` | 0.6830 | 1.9662 | 1.0329 |
+| latent32 | `hh2_lh5_lrh5` | 0.6286 | 1.9670 | 1.0480 |
+
+#### Interpretation
+
+- `hh1_lh2_lrh1` remains the strongest normal online mode.
+- `hh2_lh2_lrh1` is worse than `hh1_lh2_lrh1` for both models.
+- `lh5` hurts badly online.
+- `lrh5` is the worst setting.
+- Subgoal churn is much larger in `hh2` than in `hh1`.
+- This is direct evidence that online high-level replanning is unstable in the `hh2` regime.
+- The `lh5/lrh5` settings also have much larger reality gap than the better settings, especially in the `lrh5` case.
+
+### Acting-Diagnostics Summary
+
+Across the online acting diagnostics, the picture is much sharper than in the offline planning-only diagnostics.
+
+What is confirmed to work:
+
+- midpoint-style control is possible online when oracle subgoals are provided
+- `lh2` is the best low-level online setting among the tested horizons
+- `hh2` generated subgoals are still better than `hh1` generated subgoals
+
+What is confirmed to be broken or weak:
+
+- longer low-level horizons (`lh3`, especially `lh5`) are bad online despite looking better offline
+- generated intermediate subgoals are temporally misaligned
+- normal `hh2` online control has much larger subgoal churn than `hh1`
+- `lrh5` is especially unstable online
+
+Main conclusion from the acting diagnostics:
+
+- the offline hierarchy was overestimating controllability
+- the low-level planner is not hopeless, but it is only reliable online in the shorter-horizon `lh2` regime
+- the high-level generator is producing intermediate waypoints that are still temporally wrong
+- online `hh2` failure is strongly tied to high-level replanning churn and to weak long-horizon low-level execution
+
+The combined offline + online read is therefore:
+
+- split planning is not impossible
+- but the current generated midpoint subgoal and the current online replanning loop are not yet stable enough to make `hh2` beat the simpler `hh1_lh2` baseline
