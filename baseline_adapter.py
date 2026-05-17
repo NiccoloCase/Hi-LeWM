@@ -10,6 +10,10 @@ from typing import Dict, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent
 BASELINE_ROOT = REPO_ROOT / "third_party" / "lewm"
+BASELINE_REQUIRED_FILES = (
+    "module.py",
+    "utils.py",
+)
 
 
 def ensure_baseline_available() -> Path:
@@ -17,6 +21,14 @@ def ensure_baseline_available() -> Path:
         raise RuntimeError(
             "Baseline submodule not found at third_party/lewm. "
             "Run: git submodule update --init --recursive"
+        )
+    missing = [relpath for relpath in BASELINE_REQUIRED_FILES if not (BASELINE_ROOT / relpath).exists()]
+    if missing:
+        missing_str = ", ".join(missing)
+        raise RuntimeError(
+            "Baseline submodule is present but incomplete at third_party/lewm. "
+            f"Missing required files: {missing_str}. "
+            "Run: git submodule update --init --recursive third_party/lewm"
         )
     return BASELINE_ROOT
 
