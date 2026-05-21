@@ -2,16 +2,16 @@
 
 This document explains how inference-time planning is configured in this repository, with explicit grounding in:
 
-- HLWM paper: [HLWM_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/HLWM_paper.pdf)
-- LeWM paper: [lwm_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/lwm_paper.pdf)
+- HLWM paper: [HLWM_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/HLWM_paper.pdf)
+- LeWM paper: [lwm_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/lwm_paper.pdf)
 
 It also links choices to our local training/eval code:
 
-- PushT eval config: [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml)
-- Eval runner: [hi_eval.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py)
-- Hierarchical policy and latent prior calibration: [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py)
-- Hi-level training config: [config/train/hi_lewm.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/train/hi_lewm.yaml)
-- PushT training data config: [config/train/data/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/train/data/hi_pusht.yaml)
+- PushT eval config: [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml)
+- Eval runner: [hi_eval.py](/gpfs/home2/scur0200/main/hi_eval.py)
+- Hierarchical policy and latent prior calibration: [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py)
+- Hi-level training config: [config/train/hi_lewm.yaml](/gpfs/home2/scur0200/main/config/train/hi_lewm.yaml)
+- PushT training data config: [config/train/data/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/train/data/hi_pusht.yaml)
 
 ## 1) Quick start
 
@@ -52,7 +52,7 @@ Example (current low-level PushT):
 
 ### `planning.mode=hierarchical` (default)
 
-Implemented in [hi_eval.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py) + [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py):
+Implemented in [hi_eval.py](/gpfs/home2/scur0200/main/hi_eval.py) + [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py):
 
 1. Build two CEM solvers:
    - high-level CEM over latent macro-actions (`planning.high.*`)
@@ -65,9 +65,9 @@ Implemented in [hi_eval.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py) + 
    - execute low-level receding-horizon chunk
 
 Code path:
-- mode switch + policy build: [hi_eval.py:93](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:93)
-- latent prior calibration call: [hi_eval.py:116](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:116)
-- policy high/low planning loop: [hi_policy.py:323](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:323)
+- mode switch + policy build: [hi_eval.py:93](/gpfs/home2/scur0200/main/hi_eval.py:93)
+- latent prior calibration call: [hi_eval.py:116](/gpfs/home2/scur0200/main/hi_eval.py:116)
+- policy high/low planning loop: [hi_policy.py:323](/gpfs/home2/scur0200/main/hi_policy.py:323)
 
 ### `planning.mode=flat` (fallback)
 
@@ -76,14 +76,14 @@ In `flat` mode we instantiate `stable_worldmodel.policy.WorldModelPolicy` with t
 - `plan_config`
 
 Code path:
-- [hi_eval.py:95](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:95)
+- [hi_eval.py:95](/gpfs/home2/scur0200/main/hi_eval.py:95)
 
 Important:
 - Top-level `solver` + `plan_config` remain in config specifically for this fallback path.
 
 ## 4) PushT values and grounding (paper + our training)
 
-Current PushT hierarchical values are in [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml).
+Current PushT hierarchical values are in [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml).
 
 ### 4.1 Full hierarchical snapshot (`hi_pusht`)
 
@@ -115,27 +115,27 @@ Current PushT hierarchical values are in [config/eval/hi_pusht.yaml](/Users/nicc
 | `planning.low.plan_config.receding_horizon` | `1` |
 | `planning.low.plan_config.action_block` | `5` |
 
-Source: [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml)
+Source: [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml)
 
 | Key | Current PushT value | Grounding in papers | Grounding in our code/training | Why this value makes sense |
 |---|---:|---|---|---|
-| `planning.high.plan_config.horizon` | 2 | HLWM Appendix C, Table 10, row `Push-T (d=25)`: high-level `pred H = 2` | [hi_pusht.yaml:38](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:38) | Matches HLWM high-level lookahead for PushT.
-| `planning.high.solver.num_samples` | 900 | HLWM Appendix C, Table 10: high-level `#samples = 900` | [hi_pusht.yaml:31](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:31) | Directly aligned with HLWM PushT hierarchical setup.
-| `planning.high.solver.n_steps` | 20 | HLWM Appendix C, Table 10: high-level `#iters = 20` | [hi_pusht.yaml:33](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:33) | Same optimization depth as paper row.
-| `planning.high.solver.topk` | 10 | HLWM Appendix C, Table 10: high-level `#elites = 10` | [hi_pusht.yaml:34](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:34) | Same elite selection ratio used in paper setup.
-| `planning.high.plan_config.receding_horizon` | 1 | Receding-horizon MPC in HLWM/LeWM methodology | [hi_pusht.yaml:39](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:39), [hi_policy.py:335](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:335) | Use first high-level block now, keep/shift remainder with warm start.
-| `planning.high.plan_config.action_block` | 1 | HLWM high-level plan is over latent macro-actions; with `H=2` this means two latent decisions per solve | [hi_pusht.yaml:40](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:40), [hi_jepa.py:447](/Users/niccolocaselli/Desktop/h-le-wm/hi_jepa.py:447) | Keeps latent search compact and directly aligned with `pred H=2`.
-| `planning.high.replan_interval` | 5 | HLWM Appendix C, Table 10: `k = 5` for Push-T rows | [hi_pusht.yaml:26](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:26) | Replans macro-level every 5 env steps.
-| `planning.low.plan_config.horizon` | 5 | HLWM Table 10 low-level `pred h = 5`; LeWM planning section uses horizon 5 for PushT | [hi_pusht.yaml:63](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:63) | Matches both HLWM hierarchical and LeWM flat horizon scale.
-| `planning.low.solver.num_samples` | 300 | HLWM Table 10 low-level `#samples = 300`; LeWM planning uses 300 candidates per step | [hi_pusht.yaml:56](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:56) | Standard compute budget from LeWM/HLWM PushT.
-| `planning.low.solver.n_steps` | 30 | HLWM Table 10 low-level `#iters = 30`; LeWM planning section: 30 iterations in PushT | [hi_pusht.yaml:58](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:58) | Same optimization depth used in PushT in both papers.
-| `planning.low.solver.topk` | 10 | HLWM Table 10 low-level `#elites = 10` | [hi_pusht.yaml:59](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:59) | Follows HLWM hierarchical CEM row.
-| `planning.low.plan_config.action_block` | 5 | LeWM: horizon 5 corresponds to 25 env steps because frame skip 5 | [hi_pusht.yaml:65](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:65), [hi_pusht train data:3](/Users/niccolocaselli/Desktop/h-le-wm/config/train/data/hi_pusht.yaml:3) | Training uses `frameskip=5`, so block-of-5 is temporally aligned.
-| `planning.low.plan_config.receding_horizon` | 1 | MPC principle in both papers (receding-horizon replanning) | [hi_pusht.yaml:64](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:64), [hi_policy.py:376](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:376) | Execute 1 low block (=5 env steps), then refresh plan.
+| `planning.high.plan_config.horizon` | 2 | HLWM Appendix C, Table 10, row `Push-T (d=25)`: high-level `pred H = 2` | [hi_pusht.yaml:38](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:38) | Matches HLWM high-level lookahead for PushT.
+| `planning.high.solver.num_samples` | 900 | HLWM Appendix C, Table 10: high-level `#samples = 900` | [hi_pusht.yaml:31](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:31) | Directly aligned with HLWM PushT hierarchical setup.
+| `planning.high.solver.n_steps` | 20 | HLWM Appendix C, Table 10: high-level `#iters = 20` | [hi_pusht.yaml:33](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:33) | Same optimization depth as paper row.
+| `planning.high.solver.topk` | 10 | HLWM Appendix C, Table 10: high-level `#elites = 10` | [hi_pusht.yaml:34](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:34) | Same elite selection ratio used in paper setup.
+| `planning.high.plan_config.receding_horizon` | 1 | Receding-horizon MPC in HLWM/LeWM methodology | [hi_pusht.yaml:39](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:39), [hi_policy.py:335](/gpfs/home2/scur0200/main/hi_policy.py:335) | Use first high-level block now, keep/shift remainder with warm start.
+| `planning.high.plan_config.action_block` | 1 | HLWM high-level plan is over latent macro-actions; with `H=2` this means two latent decisions per solve | [hi_pusht.yaml:40](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:40), [hi_jepa.py:447](/gpfs/home2/scur0200/main/hi_jepa.py:447) | Keeps latent search compact and directly aligned with `pred H=2`.
+| `planning.high.replan_interval` | 5 | HLWM Appendix C, Table 10: `k = 5` for Push-T rows | [hi_pusht.yaml:26](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:26) | Replans macro-level every 5 env steps.
+| `planning.low.plan_config.horizon` | 5 | HLWM Table 10 low-level `pred h = 5`; LeWM planning section uses horizon 5 for PushT | [hi_pusht.yaml:63](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:63) | Matches both HLWM hierarchical and LeWM flat horizon scale.
+| `planning.low.solver.num_samples` | 300 | HLWM Table 10 low-level `#samples = 300`; LeWM planning uses 300 candidates per step | [hi_pusht.yaml:56](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:56) | Standard compute budget from LeWM/HLWM PushT.
+| `planning.low.solver.n_steps` | 30 | HLWM Table 10 low-level `#iters = 30`; LeWM planning section: 30 iterations in PushT | [hi_pusht.yaml:58](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:58) | Same optimization depth used in PushT in both papers.
+| `planning.low.solver.topk` | 10 | HLWM Table 10 low-level `#elites = 10` | [hi_pusht.yaml:59](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:59) | Follows HLWM hierarchical CEM row.
+| `planning.low.plan_config.action_block` | 5 | LeWM: horizon 5 corresponds to 25 env steps because frame skip 5 | [hi_pusht.yaml:65](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:65), [hi_pusht train data:3](/gpfs/home2/scur0200/main/config/train/data/hi_pusht.yaml:3) | Training uses `frameskip=5`, so block-of-5 is temporally aligned.
+| `planning.low.plan_config.receding_horizon` | 1 | MPC principle in both papers (receding-horizon replanning) | [hi_pusht.yaml:64](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:64), [hi_policy.py:376](/gpfs/home2/scur0200/main/hi_policy.py:376) | Execute 1 low block (=5 env steps), then refresh plan.
 
 Additional training consistency notes:
-- Our high-level training uses variable waypoint gaps (`random_sorted`, `num=5`, `max_span=15`) in [config/train/hi_lewm.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/train/hi_lewm.yaml:55).
-- Action chunks between waypoints are variable length and masked in [hi_train.py:419](/Users/niccolocaselli/Desktop/h-le-wm/hi_train.py:419).
+- Our high-level training uses variable waypoint gaps (`random_sorted`, `num=5`, `max_span=15`) in [config/train/hi_lewm.yaml](/gpfs/home2/scur0200/main/config/train/hi_lewm.yaml:55).
+- Action chunks between waypoints are variable length and masked in [hi_train.py:419](/gpfs/home2/scur0200/main/hi_train.py:419).
 - This is why latent macro-actions represent temporally extended behavior, not single primitive actions.
 
 ## 5) Exact config key reference
@@ -164,8 +164,8 @@ Additional training consistency notes:
   - `fallback_abs`: fallback symmetric box if calibration fails
 
 Where implemented:
-- calibration logic: [hi_policy.py:42](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:42)
-- calibration call frequency: once at policy build in [hi_eval.py:116](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:116)
+- calibration logic: [hi_policy.py:42](/gpfs/home2/scur0200/main/hi_policy.py:42)
+- calibration call frequency: once at policy build in [hi_eval.py:116](/gpfs/home2/scur0200/main/hi_eval.py:116)
 
 ### `planning.low.*`
 
@@ -176,13 +176,13 @@ Where implemented:
   - `action_block`: primitive actions per block
 
 Where used:
-- low-level solve and action buffering: [hi_policy.py:351](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:351)
+- low-level solve and action buffering: [hi_policy.py:351](/gpfs/home2/scur0200/main/hi_policy.py:351)
 
 ### Other eval keys
 
 - `world.*`
   - `env_name`, `num_envs`, `history_size`, `frame_skip`, optional env-specific keys (`task` in Reacher)
-  - `max_episode_steps` is set at runtime to `2 * eval_budget` in [hi_eval.py:166](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:166)
+  - `max_episode_steps` is set at runtime to `2 * eval_budget` in [hi_eval.py:166](/gpfs/home2/scur0200/main/hi_eval.py:166)
 - `dataset.*`
   - `stats` and `keys_to_cache` (columns used for normalizers and cached loading)
 - `eval.*`
@@ -203,22 +203,22 @@ These remain active only when `planning.mode=flat`:
 - `solver` (top-level)
 - `plan_config` (top-level)
 
-Current PushT top-level values are in [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:67).
+Current PushT top-level values are in [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:67).
 
 ## 7) Paper citations used (exact locations)
 
 1. HLWM hierarchical PushT CEM hyperparameters:
-   - Appendix C, Table 10, row `Push-T (d = 25)` in [HLWM_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/HLWM_paper.pdf)
+   - Appendix C, Table 10, row `Push-T (d = 25)` in [HLWM_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/HLWM_paper.pdf)
    - Values used there: high (`#elites=10`, `#iters=20`, `#samples=900`, `pred H=2`, `k=5`), low (`#elites=10`, `#iters=30`, `#samples=300`, `pred h=5`).
 2. HLWM method statement for two temporal scales and receding-horizon MPC:
-   - Main text Sec. 3 (hierarchical planning description), [HLWM_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/HLWM_paper.pdf)
+   - Main text Sec. 3 (hierarchical planning description), [HLWM_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/HLWM_paper.pdf)
 3. LeWM planning solver defaults for PushT:
-   - Appendix D, "Planning solver" in [lwm_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/lwm_paper.pdf)
+   - Appendix D, "Planning solver" in [lwm_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/lwm_paper.pdf)
    - CEM with `300` samples, up to `30` iterations, top `30` elites, horizon `5`.
 4. LeWM frame-skip interpretation:
-   - Appendix D implementation details: frame skip `5`, where horizon `5` corresponds to `25` env timesteps, [lwm_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/lwm_paper.pdf)
+   - Appendix D implementation details: frame skip `5`, where horizon `5` corresponds to `25` env timesteps, [lwm_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/lwm_paper.pdf)
 5. LeWM PushT eval protocol:
-   - Appendix eval setup: PushT uses `eval_budget=50` and goals sampled `25` steps ahead, [lwm_paper.pdf](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/lwm_paper.pdf)
+   - Appendix eval setup: PushT uses `eval_budget=50` and goals sampled `25` steps ahead, [lwm_paper.pdf](/gpfs/home2/scur0200/main/roadmap/references/lwm_paper.pdf)
 
 ## 8) Important practical note on latent prior calibration
 

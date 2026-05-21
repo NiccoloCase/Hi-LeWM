@@ -1,6 +1,6 @@
 # hope2 Experiment 4: Generated-Subgoal Reachability
 
-Source: [hi_diagnostics_report_2026-05-09.md](/gpfs/home2/scur0200/main/roadmap/hi_diagnostics_report_2026-05-09.md:542)
+Source: [hi_diagnostics_report_2026-05-09.md](/gpfs/home2/scur0200/main/roadmap/analysis/hi_diagnostics_report_2026-05-09.md:542)
 
 This note keeps only the `hope2` rows from the `Actual results` table.
 

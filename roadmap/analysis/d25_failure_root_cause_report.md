@@ -129,7 +129,7 @@ For the standard Push-T setup where the goal is reachable within 25 steps and th
 - **LeWM**: `96.0 ± 2.83`
 
 Source:
-- [roadmap/lwm_paper.txt](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/lwm_paper.txt:2434)
+- [roadmap/lwm_paper.txt](/gpfs/home2/scur0200/main/roadmap/references/lwm_paper.txt:2434)
 
 ### HLWM paper
 
@@ -139,7 +139,7 @@ For Push-T with DINO-WM, the hierarchical paper reports:
 - `d=50`: flat `55%`, hierarchical `78%`
 
 Source:
-- [roadmap/HLWM_paper.txt](/Users/niccolocaselli/Desktop/h-le-wm/roadmap/HLWM_paper.txt:617)
+- [roadmap/HLWM_paper.txt](/gpfs/home2/scur0200/main/roadmap/references/HLWM_paper.txt:617)
 
 These are the relevant baseline anchors for the acceptance criteria:
 
@@ -173,16 +173,16 @@ The repo does have a flat fallback path, but it does **not** match baseline LeWM
   - `horizon=5`
   - `receding_horizon=5`
   - `action_block=5`
-  - [third_party/lewm/config/eval/pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/third_party/lewm/config/eval/pusht.yaml:23)
+  - [third_party/lewm/config/eval/pusht.yaml](/gpfs/home2/scur0200/main/third_party/lewm/config/eval/pusht.yaml:23)
 
 - Current hierarchical eval config top-level flat fallback:
   - `horizon=1`
   - `receding_horizon=1`
   - `action_block=5`
-  - [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:78)
+  - [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:78)
 
 - `hi_eval.py` really uses those top-level keys in flat mode:
-  - [hi_eval.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:101)
+  - [hi_eval.py](/gpfs/home2/scur0200/main/hi_eval.py:101)
 
 ### Why it matters
 
@@ -205,7 +205,7 @@ The intended unified method is:
 
 But the code currently chooses planner mode only from static config:
 
-- [hi_eval.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:101)
+- [hi_eval.py](/gpfs/home2/scur0200/main/hi_eval.py:101)
 
 There is no branch on:
 
@@ -236,9 +236,9 @@ The hierarchical policy genuinely does:
 
 Relevant code:
 
-- high-level solve: [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:368)
-- subgoal extraction from high rollout: [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:399)
-- low-level solve against `z_subgoal`: [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:404)
+- high-level solve: [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py:368)
+- subgoal extraction from high rollout: [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py:399)
+- low-level solve against `z_subgoal`: [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py:404)
 
 ### Why it matters
 
@@ -255,12 +255,12 @@ Keep this as a valid root-cause hypothesis, but classify it as a design-level is
 ### What is true
 
 - Baseline CEM uses `topk=30`
-  - [third_party/lewm/config/eval/solver/cem.yaml](/Users/niccolocaselli/Desktop/h-le-wm/third_party/lewm/config/eval/solver/cem.yaml:1)
+  - [third_party/lewm/config/eval/solver/cem.yaml](/gpfs/home2/scur0200/main/third_party/lewm/config/eval/solver/cem.yaml:1)
 
 - Hierarchical low-level Push-T config uses:
   - `topk=10`
   - `receding_horizon=1`
-  - [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:51)
+  - [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:51)
 
 ### Why it matters
 
@@ -286,9 +286,9 @@ This is a real configuration mismatch and should stay in the report.
 Code:
 
 - action extraction and flatten-style sampling:
-  - [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:92)
-  - [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:146)
-  - [hi_policy.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_policy.py:165)
+  - [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py:92)
+  - [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py:146)
+  - [hi_policy.py](/gpfs/home2/scur0200/main/hi_policy.py:165)
 
 What it does **not** do:
 
@@ -315,19 +315,19 @@ Several eval entrypoints still pass the removed Hydra key `wm.num_levels=2`.
 
 Examples:
 
-- [jobs/eval/hi/eval_hope1_medium.sh](/Users/niccolocaselli/Desktop/h-le-wm/jobs/eval/hi/eval_hope1_medium.sh:183)
-- [jobs/eval/hi/pusht_eval_l2_d25.sh](/Users/niccolocaselli/Desktop/h-le-wm/jobs/eval/hi/pusht_eval_l2_d25.sh:107)
-- [jobs/eval/hi/pusht_eval_l2_d25_simple.sh](/Users/niccolocaselli/Desktop/h-le-wm/jobs/eval/hi/pusht_eval_l2_d25_simple.sh:30)
+- [jobs/eval/hi/eval_hope1_medium.sh](/gpfs/home2/scur0200/main/jobs/eval/hi/eval_hope1_medium.sh:183)
+- [jobs/eval/hi/pusht_eval_l2_d25.sh](/gpfs/home2/scur0200/main/jobs/eval/hi/pusht_eval_l2_d25.sh:107)
+- [jobs/eval/hi/pusht_eval_l2_d25_simple.sh](/gpfs/home2/scur0200/main/jobs/eval/hi/pusht_eval_l2_d25_simple.sh:30)
 
 The saved stderr logs show Hydra rejecting that override:
 
-- [jobs/eval/hi/eval_hope1_short_21994341.err](/Users/niccolocaselli/Desktop/h-le-wm/jobs/eval/hi/eval_hope1_short_21994341.err:16)
-- [jobs/eval/hi/eval_hope1_medium_21994342.err](/Users/niccolocaselli/Desktop/h-le-wm/jobs/eval/hi/eval_hope1_medium_21994342.err:16)
+- [jobs/eval/hi/eval_hope1_short_21994341.err](/gpfs/home2/scur0200/main/jobs/eval/hi/eval_hope1_short_21994341.err:16)
+- [jobs/eval/hi/eval_hope1_medium_21994342.err](/gpfs/home2/scur0200/main/jobs/eval/hi/eval_hope1_medium_21994342.err:16)
 
 The README is stale in the same way:
 
-- [README.md](/Users/niccolocaselli/Desktop/h-le-wm/README.md:74)
-- [README.md](/Users/niccolocaselli/Desktop/h-le-wm/README.md:108)
+- [README.md](/gpfs/home2/scur0200/main/README.md:74)
+- [README.md](/gpfs/home2/scur0200/main/README.md:108)
 
 ### Why it matters
 
@@ -346,9 +346,9 @@ This is a real repo health issue and a new concrete discovery.
 The earlier report said baseline and hierarchical evaluators use different start-index sampling logic. That is no longer true in a meaningful way for the current hierarchical path.
 
 - hierarchical helper now samples from the full valid index population:
-  - [hi_eval.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_eval.py:27)
+  - [hi_eval.py](/gpfs/home2/scur0200/main/hi_eval.py:27)
 - there is a dedicated regression test:
-  - [tests/test_hi_eval_sampling.py](/Users/niccolocaselli/Desktop/h-le-wm/tests/test_hi_eval_sampling.py:24)
+  - [tests/test_hi_eval_sampling.py](/gpfs/home2/scur0200/main/tests/test_hi_eval_sampling.py:24)
 
 This should be removed as an active root cause.
 
@@ -361,11 +361,11 @@ The P2 training objective is exactly what the config says:
 - `training.train_low_level=False`
 - `loss.alpha=0.0`
 - `loss.beta=1.0`
-- [config/train/hi_lewm.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/train/hi_lewm.yaml:80)
+- [config/train/hi_lewm.yaml](/gpfs/home2/scur0200/main/config/train/hi_lewm.yaml:80)
 
 And the loss is wired consistently in training:
 
-- [hi_train.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_train.py:450)
+- [hi_train.py](/gpfs/home2/scur0200/main/hi_train.py:450)
 
 This may still be a poor experimental choice, but it is not a broken code path.
 
@@ -375,7 +375,7 @@ This may still be a poor experimental choice, but it is not a broken code path.
 
 The training job does cap the run at 10 epochs:
 
-- [jobs/train/pusht/train_hope1.sh](/Users/niccolocaselli/Desktop/h-le-wm/jobs/train/pusht/train_hope1.sh:151)
+- [jobs/train/pusht/train_hope1.sh](/gpfs/home2/scur0200/main/jobs/train/pusht/train_hope1.sh:151)
 
 That may be too short, but it is a run decision, not an implementation failure.
 
@@ -385,12 +385,12 @@ That may be too short, but it is a run decision, not an implementation failure.
 
 Using a fixed calibration chunk length is an approximation:
 
-- [config/eval/hi_pusht.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/eval/hi_pusht.yaml:41)
+- [config/eval/hi_pusht.yaml](/gpfs/home2/scur0200/main/config/eval/hi_pusht.yaml:41)
 
 Training does use variable macro-action lengths:
 
-- [config/train/hi_lewm.yaml](/Users/niccolocaselli/Desktop/h-le-wm/config/train/hi_lewm.yaml:41)
-- [hi_train.py](/Users/niccolocaselli/Desktop/h-le-wm/hi_train.py:417)
+- [config/train/hi_lewm.yaml](/gpfs/home2/scur0200/main/config/train/hi_lewm.yaml:41)
+- [hi_train.py](/gpfs/home2/scur0200/main/hi_train.py:417)
 
 But the more important concrete problem is that calibration ignores episode boundaries. The report should emphasize that stronger finding instead of over-claiming that fixed length by itself is the bug.
 
