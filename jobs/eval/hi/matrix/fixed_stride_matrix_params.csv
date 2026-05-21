@@ -1,0 +1,8 @@
+config_index,label,run_name,checkpoint_epoch,goal_offset_steps_d,high_horizon,low_horizon,high_receding_horizon,low_receding_horizon,high_replan_interval,high_action_block,low_action_block,high_num_samples,high_n_steps,high_topk,low_num_samples,low_n_steps,low_topk,eval_budget,success_rate
+1,d25_hh1_lh2_lrh1,hi_lewm_p2_train_hope2_22253175,15,25,1,2,1,1,5,1,5,900,20,10,300,30,150,50,84.0
+2,d25_hh1_lh5_lrh1,hi_lewm_p2_train_hope2_22253175,15,25,1,5,1,1,5,1,5,900,20,10,300,30,150,50,44.0
+3,d25_hh2_lh2_lrh1,hi_lewm_p2_train_hope2_22253175,15,25,2,2,1,1,5,1,5,900,20,10,300,30,150,50,20.0
+4,d50_hh1_lh2_lrh1,hi_lewm_p2_train_hope2_22253175,15,50,1,2,1,1,5,1,5,1500,40,10,900,20,150,50,44.0
+5,d50_hh2_lh2_lrh1,hi_lewm_p2_train_hope2_22253175,15,50,2,2,1,1,5,1,5,1500,40,10,900,20,150,50,32.0
+6,d50_hh2_lh5_lrh1,hi_lewm_p2_train_hope2_22253175,15,50,2,5,1,1,5,1,5,1500,40,10,900,20,150,50,14.0
+7,d50_hh2_lh5_lrh5,hi_lewm_p2_train_hope2_22253175,15,50,2,5,1,5,5,1,5,1500,40,10,900,20,150,50,12.0

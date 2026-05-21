@@ -6,6 +6,7 @@ Hierarchical PushT evaluation jobs, organized by goal offset and experiment type
 
 - `d25/`: short-horizon eval jobs (`eval.goal_offset_steps=25`).
 - `d50/`: medium-horizon eval jobs (`eval.goal_offset_steps=50`), including sweep submit helpers.
+- `d75/`: longer-horizon eval jobs (`eval.goal_offset_steps=75`) for the dedicated hope2 sweep.
 - `matrix/`: array-driven eval suites with checkpoint lists and hardcoded config matrices.
 - `old_slurms/`: archived historical run outputs grouped by offset (`d25/`, `d50/`).
 - `EVAL_CONFIG_GUIDE.md`: notes on key eval config knobs.
@@ -40,6 +41,15 @@ Hierarchical PushT evaluation jobs, organized by goal offset and experiment type
 - `submit_d50_cpu_overnight_sweep.sh`
 - `d50/legacy/`: historical wrapper scripts retained for reference.
 - `d50/sweeps/`: per-sweep local runtime output directories.
+
+## d75 scripts
+
+- `d75/eval_hope2_d75_matrix.sh`
+  - Array-driven 7-way `d=75` sweep for `hi_lewm_p2_train_hope2_22253175` epoch `15`
+  - Uses `eval.eval_budget=150` by default
+- `d75/submit_hope2_d75_matrix.sh`
+  - Convenience submit helper for the `hope2` `d=75` array job
+  - Writes Slurm `.out/.err` files under `d75/logs/<RUN_NAME>/`
 
 ## Matrix jobs
 
