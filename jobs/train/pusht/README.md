@@ -14,6 +14,9 @@ This directory holds PushT training and benchmark jobs.
   - `train_latent_action_dim_8.sh`: later latent-dim-8 P2 variant. Despite the filename comments referring to `hope3`, it is grouped here with the follow-on frozen-P2 variants.
   - `train_latent_action_dim_8_stride_5_n4.sh`: latent-dim-8 P2 variant with `waypoints.num=4` and fixed waypoint stride `5`.
   - `train_latent_action_dim_32_stride_5_n4.sh`: clean fixed-stride-5 ablation on the stronger dim-32 P2 recipe, again with `waypoints.num=4` to keep the default span budget unchanged.
+  - `train_decoder_probe.sh`: frozen-HOPE2 latent-to-pixel decoder probe with W&B logging and node-local checkpoint/data copies.
+  - `train_decoder_probe_true.sh`: Phase A wrapper for decoder training on true HOPE2 waypoint latents.
+  - `train_decoder_probe_pred_exposed.sh`: Phase B wrapper that resumes from a Phase A decoder checkpoint and trains on predicted HOPE2 waypoint latents too.
   - Matching local `.out` / `.err` files are kept beside the corresponding script.
 - `joint/`
   - `train_joint_levels.sh`: scratch-node joint P1+P2 training run with per-epoch object and training-state checkpoints.
