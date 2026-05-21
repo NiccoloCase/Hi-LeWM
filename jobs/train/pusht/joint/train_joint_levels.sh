@@ -31,8 +31,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=24:00:00
-#SBATCH --output=train_joint_levels_%j.out
-#SBATCH --error=train_joint_levels_%j.err
+#SBATCH --output=output/joint/train_joint_levels_%j.out
+#SBATCH --error=output/joint/train_joint_levels_%j.err
 
 set -euo pipefail
 

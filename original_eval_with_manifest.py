@@ -65,6 +65,29 @@ def get_dataset(cfg, dataset_name):
     return dataset
 
 
+def resolve_eval_device(cfg: DictConfig) -> str:
+    requested = None
+
+    eval_cfg = cfg.get("eval")
+    if eval_cfg is not None and "device" in eval_cfg:
+        requested = str(eval_cfg.device).strip()
+
+    if not requested:
+        solver_cfg = cfg.get("solver")
+        if solver_cfg is not None and "device" in solver_cfg:
+            requested = str(solver_cfg.device).strip()
+
+    if not requested:
+        requested = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            f"Requested eval device '{requested}' but CUDA is not available."
+        )
+
+    return requested
+
+
 def resolve_output_dir(cfg: DictConfig) -> Path:
     base_dir = (
         Path(swm.data.utils.get_cache_dir(), cfg.policy).parent
@@ -138,8 +161,11 @@ def run(cfg: DictConfig):
 
     policy = cfg.get("policy", "random")
     if policy != "random":
+        eval_device = resolve_eval_device(cfg)
+        if "solver" in cfg and cfg.solver is not None and "device" in cfg.solver:
+            cfg.solver.device = eval_device
         model = swm.policy.AutoCostModel(cfg.policy)
-        model = model.to("cuda")
+        model = model.to(eval_device)
         model = model.eval()
         model.requires_grad_(False)
         model.interpolate_pos_encoding = True

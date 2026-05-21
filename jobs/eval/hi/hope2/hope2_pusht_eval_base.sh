@@ -5,7 +5,8 @@
 # Default behavior:
 # - Uses run: hi_lewm_p2_train_hope2_22253175
 # - Auto-selects latest object checkpoint in that run directory
-# - Forces planning.mode=hierarchical
+# - Uses planning.mode=hierarchical unless PLANNING_MODE overrides it
+# - Pins eval.num_eval via NUM_EVAL (default: 50)
 # - Device is controlled via EVAL_DEVICE and solver-device overrides
 #
 # Intended use:
@@ -90,6 +91,8 @@ export STABLEWM_HOME="${STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 RUN_NAME="${RUN_NAME:-hi_lewm_p2_train_hope2_22253175}"
 CHECKPOINT_EPOCH="${CHECKPOINT_EPOCH:-latest}"
 CONFIG_NAME="${CONFIG_NAME:-hi_pusht}"
+PLANNING_MODE="${PLANNING_MODE:-hierarchical}"
+NUM_EVAL="${NUM_EVAL:-50}"
 GOAL_OFFSET_STEPS="${GOAL_OFFSET_STEPS:-25}"
 EVAL_BUDGET="${EVAL_BUDGET:-50}"
 EVAL_SUBDIR="${EVAL_SUBDIR:-eval_hope2_d${GOAL_OFFSET_STEPS}_job_${SLURM_JOB_ID:-$(date +%Y%m%d_%H%M%S)}}"
@@ -163,6 +166,16 @@ ARTIFACTS_DIR="$(dirname "${CKPT_OBJECT_PATH}")/${EVAL_SUBDIR}"
 RESULT_PATH="${ARTIFACTS_DIR}/${RESULT_FILENAME}"
 MANIFEST_PATH="${ARTIFACTS_DIR}/${RESULT_FILENAME%.*}_episodes.tsv"
 
+case "${PLANNING_MODE}" in
+  hierarchical|hierarchical_staged|flat)
+    ;;
+  *)
+    echo "ERROR: unsupported PLANNING_MODE='${PLANNING_MODE}'" >&2
+    echo "Use one of: hierarchical, hierarchical_staged, flat." >&2
+    exit 9
+    ;;
+esac
+
 echo "Repo root: ${REPO_ROOT}"
 echo "STABLEWM_HOME: ${STABLEWM_HOME}"
 echo "Run name: ${RUN_NAME}"
@@ -170,10 +183,11 @@ echo "Checkpoint selection: ${CHECKPOINT_EPOCH}"
 echo "Checkpoint object: ${CKPT_OBJECT_PATH}"
 echo "Policy arg for hi_eval.py: ${POLICY}"
 echo "Config name: ${CONFIG_NAME}"
+echo "Planning mode: ${PLANNING_MODE}"
+echo "Num eval: ${NUM_EVAL}"
 echo "Goal offset steps (d): ${GOAL_OFFSET_STEPS}"
 echo "Eval budget: ${EVAL_BUDGET}"
 echo "Eval device: ${EVAL_DEVICE}"
-echo "Planning mode: hierarchical"
 echo "High-level planner: horizon=${HIGH_HORIZON}, receding=${HIGH_RECEDING_HORIZON}, block=${HIGH_ACTION_BLOCK}, samples=${HIGH_NUM_SAMPLES}, iters=${HIGH_N_STEPS}, topk=${HIGH_TOPK}, k=${HIGH_REPLAN_INTERVAL}"
 echo "Low-level planner: horizon=${LOW_HORIZON}, receding=${LOW_RECEDING_HORIZON}, block=${LOW_ACTION_BLOCK}, samples=${LOW_NUM_SAMPLES}, iters=${LOW_N_STEPS}, topk=${LOW_TOPK}"
 echo "Output subdir: ${EVAL_SUBDIR}"
@@ -199,7 +213,8 @@ CMD=(
   python hi_eval.py
   --config-name="${CONFIG_NAME}"
   "policy=${POLICY}"
-  "planning.mode=hierarchical"
+  "planning.mode=${PLANNING_MODE}"
+  "eval.num_eval=${NUM_EVAL}"
   "eval.goal_offset_steps=${GOAL_OFFSET_STEPS}"
   "eval.eval_budget=${EVAL_BUDGET}"
   "output.subdir=${EVAL_SUBDIR}"

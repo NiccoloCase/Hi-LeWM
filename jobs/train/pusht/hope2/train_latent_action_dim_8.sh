@@ -25,8 +25,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=10:00:00
-#SBATCH --output=train_latent_action_dim_8_%j.out
-#SBATCH --error=train_latent_action_dim_8_%j.err
+#SBATCH --output=output/hope2/train_latent_action_dim_8_%j.out
+#SBATCH --error=output/hope2/train_latent_action_dim_8_%j.err
 
 set -euo pipefail
 

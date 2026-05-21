@@ -17,11 +17,11 @@ This directory holds PushT training and benchmark jobs.
   - `train_decoder_probe.sh`: frozen-HOPE2 latent-to-pixel decoder probe with W&B logging and node-local checkpoint/data copies.
   - `train_decoder_probe_true.sh`: Phase A wrapper for decoder training on true HOPE2 waypoint latents.
   - `train_decoder_probe_pred_exposed.sh`: Phase B wrapper that resumes from a Phase A decoder checkpoint and trains on predicted HOPE2 waypoint latents too.
-  - Matching local `.out` / `.err` files are kept beside the corresponding script.
+  - Slurm stdout/stderr now land under `output/hope2/`.
 - `joint/`
   - `train_joint_levels.sh`: scratch-node joint P1+P2 training run with per-epoch object and training-state checkpoints.
   - `train_joint_levels_resume.sh`: resume an existing joint P1+P2 run in place from its saved `..._weights.ckpt`, keeping the same run directory and W&B id.
-  - Matching local `.out` / `.err` files are kept beside the corresponding script.
+  - Slurm stdout/stderr now land under `output/joint/`.
 - `benchmarks/`
   - `benchmark.sh`: short P2 throughput benchmark.
   - `benchmark_ab_io.sh`: A/B benchmark for shared scratch vs node-local TMPDIR I/O.
@@ -31,6 +31,6 @@ This directory holds PushT training and benchmark jobs.
 
 Generated runtime artifacts (Slurm outputs and benchmark logs) are intentionally untracked:
 
-- `*.out`, `*.err`, `*.log`
+- `output/`
 - `out/` runtime logs created by benchmark scripts
 - `old/` historical local log snapshots

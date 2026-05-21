@@ -4,6 +4,7 @@ import os
 import time
 from pathlib import Path
 import re
+from contextlib import contextmanager
 
 import hydra
 import numpy as np
@@ -21,7 +22,8 @@ from hi_policy import (
     calibrate_latent_prior,
 )
 
-os.environ["MUJOCO_GL"] = "egl"
+# Respect an explicit launcher choice such as MUJOCO_GL=osmesa for CPU jobs.
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 # Backward-compatibility for torch.load on object checkpoints saved by hi_train:
 # those pickles may reference classes under the dynamic module name
@@ -31,6 +33,32 @@ os.environ["MUJOCO_GL"] = "egl"
 _ = _baseline_adapter.ARPredictor
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".gif"}
+
+
+@contextmanager
+def force_torch_load_map_location(device: str):
+    """Default torch.load(..., map_location=device) when caller omitted it.
+
+    This protects CPU-only eval jobs from checkpoints saved on CUDA devices when
+    downstream loaders do not pass map_location explicitly.
+    """
+    normalized = str(device).strip().lower()
+    if normalized != "cpu":
+        yield
+        return
+
+    original_torch_load = torch.load
+
+    def _torch_load_with_cpu_map_location(*args, **kwargs):
+        if "map_location" not in kwargs or kwargs["map_location"] is None:
+            kwargs["map_location"] = "cpu"
+        return original_torch_load(*args, **kwargs)
+
+    torch.load = _torch_load_with_cpu_map_location
+    try:
+        yield
+    finally:
+        torch.load = original_torch_load
 
 
 def resolve_output_dir(cfg: DictConfig) -> Path:
@@ -425,7 +453,8 @@ def run(cfg: DictConfig):
         else:
             model_device = str(cfg.solver.device)
 
-        model = swm.policy.AutoCostModel(cfg.policy)
+        with force_torch_load_map_location(model_device):
+            model = swm.policy.AutoCostModel(cfg.policy)
         model = model.to(model_device)
         model = model.eval()
         model.requires_grad_(False)

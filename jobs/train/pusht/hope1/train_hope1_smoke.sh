@@ -20,8 +20,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=01:00:00
-#SBATCH --output=train_hope1_smoke_%j.out
-#SBATCH --error=train_hope1_smoke_%j.err
+#SBATCH --output=output/hope1/train_hope1_smoke_%j.out
+#SBATCH --error=output/hope1/train_hope1_smoke_%j.err
 
 set -euo pipefail
 

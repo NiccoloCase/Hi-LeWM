@@ -17,8 +17,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=02:00:00
-#SBATCH --output=bench_cpu_opt_%j.out
-#SBATCH --error=bench_cpu_opt_%j.err
+#SBATCH --output=output/benchmarks/bench_cpu_opt_%j.out
+#SBATCH --error=output/benchmarks/bench_cpu_opt_%j.err
 
 set -euo pipefail
 

@@ -14,15 +14,15 @@
 #   MODE=pred_exposed INIT_DECODER_CKPT=/scratch-shared/$USER/stablewm_data/runs/.../hi_decoder_probe_true_probe.pt sbatch hope2/train_decoder_probe.sh
 #   TRAIN_RUN_NAME=hi_decoder_probe_true_custom sbatch hope2/train_decoder_probe.sh
 
-#SBATCH --partition=gpu_a100
+#SBATCH --partition=gpu_h100
 #SBATCH --constraint=scratch-node
 #SBATCH --gpus=1
 #SBATCH --job-name=hi_decoder_probe
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=10:00:00
-#SBATCH --output=train_decoder_probe_%j.out
-#SBATCH --error=train_decoder_probe_%j.err
+#SBATCH --output=output/hope2/train_decoder_probe_%j.out
+#SBATCH --error=output/hope2/train_decoder_probe_%j.err
 
 set -euo pipefail
 
