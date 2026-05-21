@@ -10,10 +10,6 @@
 
 set -eo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." >/dev/null 2>&1 && pwd)"
-mkdir -p "${SCRIPT_DIR}/out"
-
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
@@ -26,4 +22,4 @@ cd ../../..
 
 export STABLEWM_HOME="${STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 
-python third_party/lewm/eval.py --config-name=pusht.yaml policy=pusht/lewm
+python third_party/lewm/eval.py --config-name=pusht.yaml policy=pusht/lewm eval.goal_offset_steps=50 eval.eval_budget=100
