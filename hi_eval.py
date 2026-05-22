@@ -17,8 +17,10 @@ from torchvision.transforms import v2 as transforms
 
 import baseline_adapter as _baseline_adapter
 from hi_policy import (
+    EmpiricalMacroActionSolver,
     HierarchicalWorldModelPolicy,
     StagedHierarchicalWorldModelPolicy,
+    build_empirical_macro_action_bank,
     calibrate_latent_prior,
 )
 
@@ -330,6 +332,48 @@ def build_policy(cfg, model, dataset, process, transform):
     low_cfg = swm.policy.PlanConfig(**cfg.planning.low.plan_config)
     high_solver = hydra.utils.instantiate(cfg.planning.high.solver, model=model)
     low_solver = hydra.utils.instantiate(cfg.planning.low.solver, model=model)
+
+    empirical_cfg = cfg.planning.high.get("empirical_macro", None)
+    if empirical_cfg is not None and bool(empirical_cfg.get("enabled", False)):
+        if mode not in {"hierarchical", "hierarchical_staged"}:
+            raise ValueError(
+                "planning.high.empirical_macro is supported only for "
+                "planning.mode=hierarchical or hierarchical_staged."
+            )
+        bank = build_empirical_macro_action_bank(
+            model=model,
+            dataset=dataset,
+            cfg=empirical_cfg,
+            high_horizon=int(high_cfg.horizon),
+            high_action_block=int(high_cfg.action_block),
+            process=process,
+            seed=int(empirical_cfg.get("seed", int(cfg.seed))),
+        )
+        solver_cfg = cfg.planning.high.solver
+        high_solver = EmpiricalMacroActionSolver(
+            model=model,
+            macro_bank=bank["actions"],
+            batch_size=int(solver_cfg.batch_size),
+            num_samples=int(solver_cfg.num_samples),
+            var_scale=float(solver_cfg.var_scale),
+            n_steps=int(solver_cfg.n_steps),
+            topk=int(solver_cfg.topk),
+            device=str(solver_cfg.device),
+            seed=int(solver_cfg.seed),
+            residual_scale=float(empirical_cfg.get("residual_scale", 0.1)),
+            min_residual_std=float(empirical_cfg.get("min_residual_std", 1.0e-3)),
+            return_top_candidates=int(empirical_cfg.get("return_top_candidates", 8)),
+            stage_sampling=str(empirical_cfg.get("stage_sampling", "sequence")),
+        )
+        print(
+            "[hi_eval] enabled empirical macro-action high solver "
+            f"(sequences={int(bank['num_sequences'])}, chunk_len={int(bank['chunk_len'])}, "
+            f"raw_macro_len={int(bank['raw_macro_len'])}, "
+            f"encode_batch_size={int(bank['encode_batch_size'])}, "
+            f"residual_scale={float(empirical_cfg.get('residual_scale', 0.1)):g}, "
+            f"return_top_candidates={int(empirical_cfg.get('return_top_candidates', 8))}, "
+            f"stage_sampling={str(empirical_cfg.get('stage_sampling', 'sequence'))})"
+        )
 
     high_bounds = None
     if bool(cfg.planning.high.latent_prior.get("enabled", True)):
