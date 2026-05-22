@@ -34,17 +34,22 @@ logs/
 # Local training/eval artifacts
 wandb/
 outputs/
+/output/
 lightning_logs/
 data/stablewm/
 *.ckpt
 *.pt
 *.pth
 *.h5
+jobs/**/output/**
+!jobs/**/output/.gitkeep
+!jobs/**/output/**/.gitkeep
 
 # Local environment variables
 .env
 .env.*
 environment.json
+/environment_v*.json
 .codex
 jobs_github_ready_*.zip
 

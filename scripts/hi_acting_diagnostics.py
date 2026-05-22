@@ -1151,9 +1151,15 @@ def run_oracle_subgoal_acting(cfg: ActingDiagnosticConfig) -> dict[str, Any]:
         "result_status": "ok",
     }
     npz_arrays = {
+        "sampled_indices": np.asarray(batch.sampled_indices),
+        "episodes_idx": np.asarray(batch.episodes_idx),
+        "start_steps": np.asarray(batch.start_steps),
         "episode_successes": np.asarray(loop["episode_successes"]),
         "future_latents": batch.future_latents.detach().cpu().numpy(),
+        "start_latent": batch.start_latent.detach().cpu().numpy(),
+        "goal_latent": batch.goal_latent.detach().cpu().numpy(),
         "oracle_stage_targets": stage_targets.detach().cpu().numpy(),
+        "final_latent": final_pixels.detach().cpu().numpy(),
     }
     return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row, npz_arrays=npz_arrays)
 
@@ -1165,7 +1171,12 @@ def run_low_level_reality_gap(cfg: ActingDiagnosticConfig) -> dict[str, Any]:
     offsets = tuple(int(x) for x in cfg.subgoal_offsets)
     offset_results = []
     npz_arrays: dict[str, Any] = {
+        "sampled_indices": np.asarray(batch.sampled_indices),
+        "episodes_idx": np.asarray(batch.episodes_idx),
+        "start_steps": np.asarray(batch.start_steps),
         "future_latents": batch.future_latents.detach().cpu().numpy(),
+        "start_latent": batch.start_latent.detach().cpu().numpy(),
+        "goal_latent": batch.goal_latent.detach().cpu().numpy(),
     }
     for offset in offsets:
         offset_steps = int(offset * cfg.frame_skip)
@@ -1337,8 +1348,14 @@ def run_generated_subgoal_acting(cfg: ActingDiagnosticConfig) -> dict[str, Any]:
         tsv_row[f"step{item['step']}_stage_end_actual_error_mean"] = item["stage_end_actual_error_mean"]
         tsv_row[f"step{item['step']}_offset_error_token_mean"] = item["offset_error_token_mean"]
     npz_arrays = {
+        "sampled_indices": np.asarray(batch.sampled_indices),
+        "episodes_idx": np.asarray(batch.episodes_idx),
+        "start_steps": np.asarray(batch.start_steps),
         "generated_stage_targets": generated_targets.detach().cpu().numpy(),
         "future_latents": batch.future_latents.detach().cpu().numpy(),
+        "start_latent": batch.start_latent.detach().cpu().numpy(),
+        "goal_latent": batch.goal_latent.detach().cpu().numpy(),
+        "final_latent": final_latent.detach().cpu().numpy(),
         "episode_successes": np.asarray(loop["episode_successes"]),
     }
     return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row, npz_arrays=npz_arrays)
@@ -1420,7 +1437,14 @@ def run_online_hierarchical_logging(cfg: ActingDiagnosticConfig) -> dict[str, An
         "result_status": "ok",
     }
     npz_arrays = {
+        "sampled_indices": np.asarray(batch.sampled_indices),
+        "episodes_idx": np.asarray(batch.episodes_idx),
+        "start_steps": np.asarray(batch.start_steps),
         "episode_successes": np.asarray(loop["episode_successes"]),
+        "future_latents": batch.future_latents.detach().cpu().numpy(),
+        "start_latent": batch.start_latent.detach().cpu().numpy(),
+        "goal_latent": batch.goal_latent.detach().cpu().numpy(),
+        "final_latent": final_latent.detach().cpu().numpy(),
     }
     return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row, npz_arrays=npz_arrays)
 

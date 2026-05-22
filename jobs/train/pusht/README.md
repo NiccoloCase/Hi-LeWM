@@ -17,6 +17,7 @@ This directory holds PushT training and benchmark jobs.
   - `train_decoder_probe.sh`: frozen-HOPE2 latent-to-pixel decoder probe with W&B logging and node-local checkpoint/data copies.
   - `train_decoder_probe_true.sh`: Phase A wrapper for decoder training on true HOPE2 waypoint latents.
   - `train_decoder_probe_pred_exposed.sh`: Phase B wrapper that resumes from a Phase A decoder checkpoint and trains on predicted HOPE2 waypoint latents too.
+  - `run_decoder_probe_analysis_cpu.sh`: CPU-only export job that reproduces the notebook analysis headlessly and writes metrics, galleries, rollout stories, and comparison figures into a structured shared-scratch report directory.
   - Slurm stdout/stderr now land under `output/hope2/`.
 - `joint/`
   - `train_joint_levels.sh`: scratch-node joint P1+P2 training run with per-epoch object and training-state checkpoints.

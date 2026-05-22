@@ -69,7 +69,7 @@ if ! MATRIX_DIR_RESOLVED="$(resolve_matrix_dir)"; then
   exit 2
 fi
 
-PROJECT_ROOT_DEFAULT="$(cd "${MATRIX_DIR_RESOLVED}/../../../.." >/dev/null 2>&1 && pwd)"
+PROJECT_ROOT_DEFAULT="$(cd "${MATRIX_DIR_RESOLVED}/../../../../.." >/dev/null 2>&1 && pwd)"
 export PROJECT_ROOT="${PROJECT_ROOT:-${PROJECT_ROOT_DEFAULT}}"
 
 PARAMS_FILE="${PARAMS_FILE:-${MATRIX_DIR_RESOLVED}/baseline_matrix_sweep.csv}"
@@ -150,16 +150,19 @@ module purge
 module load 2025
 module load Anaconda3/2025.06-1
 
+set +u
 eval "$(conda shell.bash hook)"
 if conda env list | grep -E '(^|[[:space:]])lewm-gpu([[:space:]]|$)' >/dev/null 2>&1; then
   conda activate lewm-gpu
 elif conda env list | grep -E '(^|[[:space:]])lewm([[:space:]]|$)' >/dev/null 2>&1; then
   conda activate lewm
 else
+  set -u
   echo "ERROR: Could not find conda environment 'lewm-gpu' or 'lewm'" >&2
   echo "Run jobs/setup/setup_env.sh first, or create the environment from environment-gpu.yml" >&2
   exit 10
 fi
+set -u
 
 cd "${REPO_ROOT}"
 

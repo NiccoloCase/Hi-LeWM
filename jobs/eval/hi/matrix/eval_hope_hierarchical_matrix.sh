@@ -3,15 +3,16 @@
 # Array-driven hope hierarchical matrix sweep for PushT checkpoints.
 #
 # Sweep source:
-# - Config rows come from hope_hierarchical_matrix_sweep.csv
+# - Config rows come from full_hierarchical_matrix_sweep.csv by default
 # - Checkpoints come from checkpoints_hope_hierarchical.txt
 #
 # Config notes:
 # - config_note blank     => planning.mode=hierarchical
 # - config_note hiStaged => planning.mode=hierarchical_staged
 # - eval_budget varies by row, but num_eval is pinned to 50 for every run
-# - CPU safety is enforced here via EVAL_DEVICE=cpu; the shared base launcher
-#   also forwards solver.device overrides and clears CUDA visibility for cpu mode
+# - Defaults to CPU, but EVAL_DEVICE may be overridden at submission time
+#   for targeted GPU reruns. The shared base launcher forwards solver.device
+#   overrides and clears CUDA visibility only when cpu mode is selected.
 #
 # Submit with:
 #   cd /gpfs/home2/scur0200/main/jobs/eval/hi/matrix
@@ -38,7 +39,7 @@ resolve_matrix_dir() {
     "/gpfs/home2/${USER}/main/jobs/eval/hi/matrix"; do
     [[ -z "${c}" ]] && continue
     if p="$(cd "${c}" >/dev/null 2>&1 && pwd)"; then
-      if [[ -f "${p}/hope_hierarchical_matrix_sweep.csv" ]]; then
+      if [[ -f "${p}/eval_hope_hierarchical_matrix.sh" && -f "${p}/checkpoints_hope_hierarchical.txt" ]]; then
         echo "${p}"
         return 0
       fi
@@ -88,7 +89,7 @@ PROJECT_ROOT_DEFAULT="$(cd "${MATRIX_DIR_RESOLVED}/../../../.." >/dev/null 2>&1 
 export PROJECT_ROOT="${PROJECT_ROOT:-${PROJECT_ROOT_DEFAULT}}"
 
 CHECKPOINT_FILE="${CHECKPOINT_FILE:-${MATRIX_DIR_RESOLVED}/checkpoints_hope_hierarchical.txt}"
-SWEEP_FILE="${SWEEP_FILE:-${MATRIX_DIR_RESOLVED}/hope_hierarchical_matrix_sweep.csv}"
+SWEEP_FILE="${SWEEP_FILE:-${MATRIX_DIR_RESOLVED}/full_hierarchical_matrix_sweep.csv}"
 BASE_SCRIPT="${BASE_SCRIPT:-${MATRIX_DIR_RESOLVED}/../hope2/hope2_pusht_eval_base.sh}"
 
 if [[ ! -f "${CHECKPOINT_FILE}" ]]; then
@@ -198,7 +199,7 @@ export MODEL_LABEL
 export CONFIG_NAME="${CONFIG_NAME:-hi_pusht}"
 export PLANNING_MODE="${PLANNING_MODE_VALUE}"
 export NUM_EVAL=50
-export EVAL_DEVICE=cpu
+export EVAL_DEVICE="${EVAL_DEVICE:-cpu}"
 export GOAL_OFFSET_STEPS="${GOAL_OFFSET_STEPS_VALUE}"
 export EVAL_BUDGET="${EVAL_BUDGET_CSV}"
 

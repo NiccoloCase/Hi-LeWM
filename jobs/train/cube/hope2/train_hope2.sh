@@ -1,28 +1,32 @@
 #!/bin/bash
 
-# Snellius training job for the frozen HOPE2 decoder probe:
-# - Read dataset + frozen HOPE2 object checkpoint from node-local TMPDIR
-# - Train only the decoder probe with W&B logging
-# - Save probe artifacts directly to shared scratch
+# Snellius training job for hope2 on OGBench Cube:
+# - Read dataset + pretrained checkpoint from node-local TMPDIR (scratch-node)
+# - Save training artifacts directly to shared scratch
 #
 # Usage:
-#   cd jobs/train/pusht
-#   sbatch hope2/train_decoder_probe.sh
+#   cd jobs/train/cube
+#   sbatch hope2/train_hope2.sh
+#
+# Default configuration:
+#   - MAX_EPOCHS=15
+#   - LATENT_ACTION_DIM=32
 #
 # Optional overrides:
-#   MODE=true_only sbatch hope2/train_decoder_probe.sh
-#   MODE=pred_exposed INIT_DECODER_CKPT=/scratch-shared/$USER/stablewm_data/runs/.../hi_decoder_probe_true_probe.pt sbatch hope2/train_decoder_probe.sh
-#   TRAIN_RUN_NAME=hi_decoder_probe_true_custom sbatch hope2/train_decoder_probe.sh
+#   MAX_EPOCHS=15 sbatch hope2/train_hope2.sh
+#   LATENT_ACTION_DIM=32 sbatch hope2/train_hope2.sh
+#   TRAIN_RUN_NAME=hi_lewm_cube_train_hope2_custom sbatch hope2/train_hope2.sh
+#   SCRATCH_STABLEWM_HOME=/scratch-shared/$USER/stablewm_data sbatch hope2/train_hope2.sh
 
 #SBATCH --partition=gpu_h100
 #SBATCH --constraint=scratch-node
 #SBATCH --gpus=1
-#SBATCH --job-name=hi_decoder_probe
+#SBATCH --job-name=hi_l2_cube_train_hope2
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=10:00:00
-#SBATCH --output=output/hope2/train_decoder_probe_%j.out
-#SBATCH --error=output/hope2/train_decoder_probe_%j.err
+#SBATCH --time=12:00:00
+#SBATCH --output=output/hope2/train_hope2_%j.out
+#SBATCH --error=output/hope2/train_hope2_%j.err
 
 set -euo pipefail
 
@@ -39,7 +43,7 @@ resolve_repo_root() {
     [[ -z "${c}" ]] && continue
     for p in "${c}" "${c}/.." "${c}/../.." "${c}/../../.."; do
       if p="$(cd "${p}" >/dev/null 2>&1 && pwd)"; then
-        if [[ -f "${p}/hi_train_decoder_probe.py" && -f "${p}/config/train/hi_decoder_probe.yaml" ]]; then
+        if [[ -f "${p}/hi_train.py" && -f "${p}/config/train/hi_lewm.yaml" ]]; then
           echo "${p}"
           return 0
         fi
@@ -57,6 +61,7 @@ fi
 BASELINE_ROOT="${REPO_ROOT}/third_party/lewm"
 if [[ ! -f "${BASELINE_ROOT}/module.py" || ! -f "${BASELINE_ROOT}/utils.py" ]]; then
   echo "ERROR: Baseline submodule is missing or incomplete at ${BASELINE_ROOT}." >&2
+  echo "Expected files: module.py and utils.py" >&2
   echo "Fix on the login node with:" >&2
   echo "  cd ${REPO_ROOT}" >&2
   echo "  git submodule update --init --recursive third_party/lewm" >&2
@@ -65,10 +70,12 @@ fi
 
 if [[ -z "${TMPDIR:-}" ]]; then
   echo "ERROR: TMPDIR is not set." >&2
+  echo "Expected a scratch-node allocation where TMPDIR points under /scratch-node." >&2
   exit 2
 fi
 if [[ "${TMPDIR}" != /scratch-node/* ]]; then
   echo "ERROR: TMPDIR is '${TMPDIR}', expected /scratch-node/... for node-local training." >&2
+  echo "Make sure this job is submitted with '#SBATCH --constraint=scratch-node'." >&2
   exit 2
 fi
 
@@ -76,11 +83,13 @@ module purge
 module load 2025
 module load Anaconda3/2025.06-1
 
+# Some cluster conda activation scripts reference unset vars; keep strict mode elsewhere.
 set +u
 eval "$(conda shell.bash hook)"
 conda activate lewm-gpu
 set -u
 
+####################################### WANDB SETUP #######################################
 WANDB_ENV_FILE="${WANDB_ENV_FILE:-$HOME/.config/wandb.env}"
 if [[ -f "${WANDB_ENV_FILE}" ]]; then
   set -a
@@ -89,93 +98,88 @@ if [[ -f "${WANDB_ENV_FILE}" ]]; then
 fi
 if [[ -z "${WANDB_API_KEY:-}" ]]; then
   echo "ERROR: WANDB_API_KEY is not set." >&2
+  echo "Set it in ${WANDB_ENV_FILE} or submit with: sbatch --export=ALL,WANDB_API_KEY=<your_key> hope2/train_hope2.sh" >&2
   exit 2
 fi
 wandb login --relogin "${WANDB_API_KEY}"
 
 WANDB_ENTITY_OVERRIDE="${WANDB_ENTITY:-null}"
-WANDB_PROJECT="${WANDB_PROJECT:-hi_decoder_probe}"
+WANDB_PROJECT="${WANDB_PROJECT:-hi_lewm}"
+
+######################################## TRAIN SETUP #######################################
 
 SCRATCH_STABLEWM_HOME="${SCRATCH_STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
-DATASET_FILE="${DATASET_FILE:-pusht_expert_train.h5}"
-HOPE2_CKPT_REL="${HOPE2_CKPT_REL:-runs/hi_lewm_p2_train_hope2_22253175/hi_lewm_p2_train_hope2_22253175_epoch_15_object.ckpt}"
-MODE="${MODE:-true_only}"
-MAX_EPOCHS="${MAX_EPOCHS:-10}"
-TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_decoder_probe_${MODE}_${SLURM_JOB_ID:-manual}}"
+DATASET_FILE="${DATASET_FILE:-cube_single_expert.h5}"
+CKPT_REL="${CKPT_REL:-cube/lewm_object.ckpt}"
+MAX_EPOCHS="${MAX_EPOCHS:-15}"
+LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-32}"
+TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_cube_train_hope2_${SLURM_JOB_ID:-manual}}"
 WANDB_RUN_ID="${WANDB_RUN_ID:-run_${SLURM_JOB_ID:-manual}}"
-IMAGE_LOG_INTERVAL="${IMAGE_LOG_INTERVAL:-1}"
-INIT_DECODER_CKPT="${INIT_DECODER_CKPT:-}"
-LIMIT_TRAIN_BATCHES="${LIMIT_TRAIN_BATCHES:-}"
-LIMIT_VAL_BATCHES="${LIMIT_VAL_BATCHES:-}"
-
-if [[ "${MODE}" != "true_only" && "${MODE}" != "pred_exposed" ]]; then
-  echo "ERROR: MODE must be one of: true_only, pred_exposed" >&2
-  exit 2
-fi
 
 SRC_DATASET="${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}"
-SRC_HOPE2_CKPT="${SCRATCH_STABLEWM_HOME}/${HOPE2_CKPT_REL}"
+SRC_CKPT="${SCRATCH_STABLEWM_HOME}/${CKPT_REL}"
 if [[ ! -f "${SRC_DATASET}" ]]; then
   echo "ERROR: dataset file not found: ${SRC_DATASET}" >&2
   exit 2
 fi
-if [[ ! -f "${SRC_HOPE2_CKPT}" ]]; then
-  echo "ERROR: HOPE2 checkpoint not found: ${SRC_HOPE2_CKPT}" >&2
+if [[ ! -f "${SRC_CKPT}" ]]; then
+  echo "ERROR: checkpoint not found: ${SRC_CKPT}" >&2
   exit 2
 fi
 
 LOCAL_STABLEWM_HOME="${LOCAL_STABLEWM_HOME:-${TMPDIR}/${USER}_stablewm_data_${SLURM_JOB_ID:-manual}}"
 LOCAL_DATASET="${LOCAL_STABLEWM_HOME}/${DATASET_FILE}"
-LOCAL_HOPE2_CKPT="${LOCAL_STABLEWM_HOME}/${HOPE2_CKPT_REL}"
+LOCAL_CKPT="${LOCAL_STABLEWM_HOME}/${CKPT_REL}"
 PERSIST_RUN_DIR="${PERSIST_RUN_DIR:-${SCRATCH_STABLEWM_HOME}/runs/${TRAIN_RUN_NAME}}"
 
+# Read data/checkpoint from local scratch for speed.
 export STABLEWM_HOME="${LOCAL_STABLEWM_HOME}"
 
 echo "Repo root: ${REPO_ROOT}"
 echo "Scratch home: ${SCRATCH_STABLEWM_HOME}"
 echo "Local home: ${LOCAL_STABLEWM_HOME}"
+echo "STABLEWM_HOME (read path): ${STABLEWM_HOME}"
 echo "Output run dir (shared): ${PERSIST_RUN_DIR}"
 echo "TMPDIR: ${TMPDIR}"
 echo "Dataset: ${DATASET_FILE}"
-echo "Frozen HOPE2 checkpoint: ${HOPE2_CKPT_REL}"
-echo "Mode: ${MODE}"
+echo "Checkpoint: ${CKPT_REL}"
 echo "Run name: ${TRAIN_RUN_NAME}"
 echo "W&B run id: ${WANDB_RUN_ID}"
 echo "Max epochs: ${MAX_EPOCHS}"
-echo "Image log interval: ${IMAGE_LOG_INTERVAL}"
-if [[ -n "${INIT_DECODER_CKPT}" ]]; then
-  echo "Init decoder checkpoint: ${INIT_DECODER_CKPT}"
-fi
+echo "Latent action dim: ${LATENT_ACTION_DIM}"
+echo "Early stopping: disabled (no early stopping callback configured)."
 
-mkdir -p "$(dirname "${LOCAL_DATASET}")" "$(dirname "${LOCAL_HOPE2_CKPT}")" "${PERSIST_RUN_DIR}"
+echo ""
+echo "==> Preparing node-local copy in ${LOCAL_STABLEWM_HOME}"
+mkdir -p "$(dirname "${LOCAL_DATASET}")" "$(dirname "${LOCAL_CKPT}")" "${PERSIST_RUN_DIR}"
 rsync -ah --info=progress2 "${SRC_DATASET}" "${LOCAL_DATASET}"
-rsync -ah --info=progress2 "${SRC_HOPE2_CKPT}" "${LOCAL_HOPE2_CKPT}"
+rsync -ah --info=progress2 "${SRC_CKPT}" "${LOCAL_CKPT}"
 
 cd "${REPO_ROOT}"
 
 CMD=(
-  python hi_train_decoder_probe.py
-  data=hi_pusht
+  python hi_train.py
+  data=hi_ogb
   output_model_name="${TRAIN_RUN_NAME}"
   subdir="${PERSIST_RUN_DIR}"
-  trainer.max_epochs="${MAX_EPOCHS}"
-  probe.mode="${MODE}"
-  probe.checkpoint.path="${LOCAL_HOPE2_CKPT}"
   wandb.config.entity="${WANDB_ENTITY_OVERRIDE}"
   wandb.config.project="${WANDB_PROJECT}"
   wandb.config.id="${WANDB_RUN_ID}"
-  wandb.image_log_interval="${IMAGE_LOG_INTERVAL}"
+  trainer.max_epochs="${MAX_EPOCHS}"
+  wm.high_level.latent_action_dim="${LATENT_ACTION_DIM}"
+  training.train_low_level=False
+  pretrained_low_level.enabled=True
+  pretrained_low_level.checkpoint.selection_mode=explicit_path
+  pretrained_low_level.checkpoint.path="${LOCAL_CKPT}"
+  pretrained_low_level.freeze.encoder=True
+  pretrained_low_level.freeze.low_level_predictor=True
+  pretrained_low_level.freeze.low_level_action_encoder=True
+  pretrained_low_level.freeze.projector=True
+  pretrained_low_level.freeze.low_pred_proj=True
+  pretrained_low_level.freeze.high_pred_proj=False
+  loss.alpha=0.0
+  loss.beta=1.0
 )
-
-if [[ -n "${INIT_DECODER_CKPT}" ]]; then
-  CMD+=("probe.init_decoder_checkpoint=${INIT_DECODER_CKPT}")
-fi
-if [[ -n "${LIMIT_TRAIN_BATCHES}" ]]; then
-  CMD+=("trainer.limit_train_batches=${LIMIT_TRAIN_BATCHES}")
-fi
-if [[ -n "${LIMIT_VAL_BATCHES}" ]]; then
-  CMD+=("trainer.limit_val_batches=${LIMIT_VAL_BATCHES}")
-fi
 
 echo ""
 echo "==> Launching training command:"
@@ -187,5 +191,5 @@ SECONDS=0
 elapsed="${SECONDS}"
 
 echo ""
-echo "Decoder probe training finished in ${elapsed}s."
+echo "Training finished in ${elapsed}s."
 echo "Artifacts are stored in: ${PERSIST_RUN_DIR}"

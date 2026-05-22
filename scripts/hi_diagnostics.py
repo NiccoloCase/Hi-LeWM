@@ -950,6 +950,10 @@ def run_macro_action_manifold_diagnostic(cfg: DiagnosticConfig) -> dict[str, Any
         tsv_row[f"step{step_idx}_elite_md2_p50"] = step_data["elite_cloud"]["mahalanobis"]["p50"]
 
     npz_arrays = {
+        "starts": np.asarray(starts),
+        "z_init": seq["z_init"].detach().cpu().numpy(),
+        "target_seq": seq["target_seq"].detach().cpu().numpy(),
+        "macro_seq": seq["macro_seq"].detach().cpu().numpy(),
         "selected_mean": cem["selected_mean"].detach().cpu().numpy(),
         "selected_best": cem["selected_best"].detach().cpu().numpy(),
         "final_elite_cost": cem["final_elite_cost"].detach().cpu().numpy(),
@@ -1049,6 +1053,12 @@ def run_high_level_teacher_vs_open_loop_diagnostic(cfg: DiagnosticConfig) -> dic
         tsv_row[f"step{step + 1}_open_cem_mse"] = result["open_loop_cem_mse_per_step"][step]
 
     npz_arrays = {
+        "starts": np.asarray(starts),
+        "z_init": seq["z_init"].detach().cpu().numpy(),
+        "target_seq": seq["target_seq"].detach().cpu().numpy(),
+        "teacher_pred": teacher_pred.detach().cpu().numpy(),
+        "open_true_pred": open_true_pred.detach().cpu().numpy(),
+        "open_cem_pred": open_cem_pred.detach().cpu().numpy(),
         "teacher_err": teacher_err.detach().cpu().numpy(),
         "open_true_err": open_true_err.detach().cpu().numpy(),
         "open_cem_err": open_cem_err.detach().cpu().numpy(),
@@ -1125,7 +1135,11 @@ def run_dataset_subgoal_reachability_diagnostic(cfg: DiagnosticConfig) -> dict[s
     for item in offset_results:
         tsv_row[f"offset{item['offset_tokens']}_terminal_error_mean"] = item["terminal_latent_error_mean"]
 
-    return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row)
+    npz_arrays = {
+        "starts": np.asarray(starts),
+        "z_init": z_init.detach().cpu().numpy(),
+    }
+    return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row, npz_arrays=npz_arrays)
 
 
 def run_generated_subgoal_reachability_diagnostic(cfg: DiagnosticConfig) -> dict[str, Any]:
@@ -1235,6 +1249,9 @@ def run_generated_subgoal_reachability_diagnostic(cfg: DiagnosticConfig) -> dict
         tsv_row[f"step{step_idx}_same_traj_distance_mean"] = step_data["nearest_same_trajectory_future_distance_mean"]
 
     npz_arrays = {
+        "starts": np.asarray(starts),
+        "z_init": seq["z_init"].detach().cpu().numpy(),
+        "target_seq": seq["target_seq"].detach().cpu().numpy(),
         "selected_mean_macro_seq": cem["selected_mean"].detach().cpu().numpy(),
         "generated_subgoal_seq": pred_seq.detach().cpu().numpy(),
     }

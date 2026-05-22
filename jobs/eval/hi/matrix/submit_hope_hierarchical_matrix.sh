@@ -1,15 +1,17 @@
 #!/bin/bash
 
-# Submit the hope hierarchical matrix sweep.
+# Submit the full hope hierarchical matrix sweep.
 #
 # Run it with:
 #   ./submit_hope_hierarchical_matrix.sh
+#
+# Override SWEEP_FILE to run a smaller ablation sweep instead.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CHECKPOINT_FILE="${CHECKPOINT_FILE:-${SCRIPT_DIR}/checkpoints_hope_hierarchical.txt}"
-SWEEP_FILE="${SWEEP_FILE:-${SCRIPT_DIR}/hope_hierarchical_matrix_sweep.csv}"
+SWEEP_FILE="${SWEEP_FILE:-${SCRIPT_DIR}/full_hierarchical_matrix_sweep.csv}"
 JOB_SCRIPT="${JOB_SCRIPT:-${SCRIPT_DIR}/eval_hope_hierarchical_matrix.sh}"
 
 if [[ ! -f "${CHECKPOINT_FILE}" ]]; then

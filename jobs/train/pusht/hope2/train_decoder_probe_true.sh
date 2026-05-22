@@ -53,7 +53,7 @@ MODE=true_only
 export MODE
 
 if [[ -z "${TRAIN_RUN_NAME:-}" ]]; then
-  export TRAIN_RUN_NAME="hi_decoder_probe_true_${SLURM_JOB_ID:-manual}"
+  export TRAIN_RUN_NAME="hi_decoder_probe_true_hope2_${SLURM_JOB_ID:-manual}"
 fi
 
 exec "${REPO_ROOT}/jobs/train/pusht/hope2/train_decoder_probe.sh"

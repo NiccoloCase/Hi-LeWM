@@ -10,7 +10,7 @@
 #     sbatch hope2/train_decoder_probe_pred_exposed.sh
 #
 # Optional overrides:
-#   MAX_EPOCHS=15 sbatch hope2/train_decoder_probe_pred_exposed.sh
+#   MAX_EPOCHS=10 sbatch hope2/train_decoder_probe_pred_exposed.sh
 #   TRAIN_RUN_NAME=hi_decoder_probe_pred_custom sbatch hope2/train_decoder_probe_pred_exposed.sh
 
 #SBATCH --partition=gpu_h100
@@ -62,7 +62,7 @@ MODE=pred_exposed
 export MODE
 
 if [[ -z "${TRAIN_RUN_NAME:-}" ]]; then
-  export TRAIN_RUN_NAME="hi_decoder_probe_pred_exposed_${SLURM_JOB_ID:-manual}"
+  export TRAIN_RUN_NAME="hi_decoder_probe_pred_exposed_hope2_${SLURM_JOB_ID:-manual}"
 fi
 
 exec "${REPO_ROOT}/jobs/train/pusht/hope2/train_decoder_probe.sh"
