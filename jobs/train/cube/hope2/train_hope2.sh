@@ -110,13 +110,29 @@ WANDB_PROJECT="${WANDB_PROJECT:-hi_lewm}"
 
 SCRATCH_STABLEWM_HOME="${SCRATCH_STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 DATASET_FILE="${DATASET_FILE:-cube_single_expert.h5}"
+DATASET_BASENAME="$(basename "${DATASET_FILE}")"
+LOCAL_DATASET_REL="${LOCAL_DATASET_REL:-ogbench/${DATASET_BASENAME}}"
 CKPT_REL="${CKPT_REL:-cube/lewm_object.ckpt}"
 MAX_EPOCHS="${MAX_EPOCHS:-15}"
 LATENT_ACTION_DIM="${LATENT_ACTION_DIM:-32}"
 TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_lewm_cube_train_hope2_${SLURM_JOB_ID:-manual}}"
 WANDB_RUN_ID="${WANDB_RUN_ID:-run_${SLURM_JOB_ID:-manual}}"
 
-SRC_DATASET="${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}"
+resolve_dataset_path() {
+  local candidate
+  for candidate in \
+    "${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}" \
+    "${SCRATCH_STABLEWM_HOME}/ogbench/${DATASET_BASENAME}"; do
+    if [[ -f "${candidate}" ]]; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+  echo "${SCRATCH_STABLEWM_HOME}/${DATASET_FILE}"
+  return 0
+}
+
+SRC_DATASET="$(resolve_dataset_path)"
 SRC_CKPT="${SCRATCH_STABLEWM_HOME}/${CKPT_REL}"
 if [[ ! -f "${SRC_DATASET}" ]]; then
   echo "ERROR: dataset file not found: ${SRC_DATASET}" >&2
@@ -128,7 +144,7 @@ if [[ ! -f "${SRC_CKPT}" ]]; then
 fi
 
 LOCAL_STABLEWM_HOME="${LOCAL_STABLEWM_HOME:-${TMPDIR}/${USER}_stablewm_data_${SLURM_JOB_ID:-manual}}"
-LOCAL_DATASET="${LOCAL_STABLEWM_HOME}/${DATASET_FILE}"
+LOCAL_DATASET="${LOCAL_STABLEWM_HOME}/${LOCAL_DATASET_REL}"
 LOCAL_CKPT="${LOCAL_STABLEWM_HOME}/${CKPT_REL}"
 PERSIST_RUN_DIR="${PERSIST_RUN_DIR:-${SCRATCH_STABLEWM_HOME}/runs/${TRAIN_RUN_NAME}}"
 
@@ -142,6 +158,8 @@ echo "STABLEWM_HOME (read path): ${STABLEWM_HOME}"
 echo "Output run dir (shared): ${PERSIST_RUN_DIR}"
 echo "TMPDIR: ${TMPDIR}"
 echo "Dataset: ${DATASET_FILE}"
+echo "Source dataset path: ${SRC_DATASET}"
+echo "Local dataset path: ${LOCAL_DATASET}"
 echo "Checkpoint: ${CKPT_REL}"
 echo "Run name: ${TRAIN_RUN_NAME}"
 echo "W&B run id: ${WANDB_RUN_ID}"
