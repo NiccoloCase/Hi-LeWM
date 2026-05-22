@@ -6,6 +6,8 @@ import sys
 from copy import deepcopy
 
 import numpy as np
+from omegaconf import OmegaConf
+import stable_worldmodel as swm
 import torch
 from torch import nn
 
@@ -13,8 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from hi_eval import build_policy
 from hi_jepa import HiJEPA
-from hi_policy import HierarchicalWorldModelPolicy, StagedHierarchicalWorldModelPolicy, calibrate_latent_prior
+from hi_policy import (
+    EmpiricalMacroActionSolver,
+    HierarchicalWorldModelPolicy,
+    StagedHierarchicalWorldModelPolicy,
+    build_empirical_macro_action_bank,
+    calibrate_latent_prior,
+)
+from hi_vq import VectorQuantizer
 
 
 class _EncOut:
@@ -75,6 +85,23 @@ class MeanLatentActionEncoder(nn.Module):
         else:
             pooled = x.mean(dim=1)
         return self.output_proj(pooled)
+
+
+class RoundingLatentActionEncoder(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.latent_dim = dim
+
+    def forward(self, x: torch.Tensor, action_mask: torch.Tensor | None = None) -> torch.Tensor:
+        x = x.float()
+        if action_mask is not None:
+            mask = action_mask.to(x.dtype).unsqueeze(-1)
+            denom = mask.sum(dim=1).clamp(min=1.0)
+            return (x * mask).sum(dim=1) / denom
+        return x.mean(dim=1)
+
+    def quantize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        return torch.round(latents)
 
 
 class ScaleProjection(nn.Module):
@@ -188,6 +215,54 @@ def test_hijepa_rollout_shapes():
     low_actions = torch.randn(2, 3, 6, 4)
     low = model.rollout_low(z_hist, None, low_actions)
     assert low.shape == (2, 3, 6, 4)
+
+
+def test_rollout_high_quantizes_planner_latents_when_supported():
+    dim = 3
+    model = HiJEPA(
+        encoder=DummyVisionEncoder(dim),
+        low_predictor=AdditivePredictor(dim),
+        action_encoder=IdentityActionEncoder(dim),
+        high_predictor=AdditivePredictor(dim),
+        latent_action_encoder=RoundingLatentActionEncoder(dim),
+        macro_to_condition=nn.Identity(),
+        projector=nn.Identity(),
+        low_pred_proj=nn.Identity(),
+        high_pred_proj=nn.Identity(),
+    )
+
+    z_init = torch.zeros(1, dim)
+    latent_actions = torch.tensor([[[0.49, 1.51, -0.49]]])
+    pred = model.rollout_high(z_init, latent_actions)
+
+    expected = torch.tensor([[[[0.0, 2.0, 0.0]]]])
+    assert torch.allclose(pred, expected)
+
+
+def test_vector_quantizer_supports_codebook_helpers():
+    quantizer = VectorQuantizer(num_codes=3, code_dim=2)
+    with torch.no_grad():
+        quantizer.codebook.weight.copy_(
+            torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.0, 2.0],
+                    [-1.0, 0.5],
+                ]
+            )
+        )
+
+    probs = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 0.25, 0.75]]])
+    latents = quantizer.code_probs_to_latents(probs)
+    expected = torch.tensor([[[1.0, 0.0], [-0.75, 0.875]]])
+    assert torch.allclose(latents, expected)
+
+    indices = torch.tensor([[2, 1]])
+    selected = quantizer.codes_to_latents(indices)
+    assert torch.allclose(selected, torch.tensor([[[-1.0, 0.5], [0.0, 2.0]]]))
+
+    recovered = quantizer.latents_to_codes(selected)
+    assert torch.equal(recovered, indices)
 
 
 def test_get_cost_high_zero_for_matching_goal():
@@ -330,6 +405,62 @@ def test_calibrate_latent_prior_respects_episode_boundaries():
     assert int(b["num_chunks"]) == 0
 
 
+def test_build_empirical_macro_action_bank_encodes_train_chunks():
+    model = make_test_hijepa(dim=4)
+    actions = np.arange(80, dtype=np.float32).reshape(20, 4)
+    dataset = FakeDataset(actions)
+    cfg = {"enabled": True, "num_sequences": 5, "chunk_len": 2}
+
+    bank = build_empirical_macro_action_bank(
+        model=model,
+        dataset=dataset,
+        cfg=cfg,
+        high_horizon=2,
+        high_action_block=1,
+        seed=13,
+    )
+
+    assert bank["actions"].shape == (5, 2, 4)
+    assert int(bank["num_sequences"]) == 5
+    possible = np.stack(
+        [
+            np.stack([actions[start : start + 2].mean(axis=0), actions[start + 2 : start + 4].mean(axis=0)])
+            for start in range(actions.shape[0] - 3)
+        ]
+    )
+    for seq in bank["actions"]:
+        assert any(np.allclose(seq, expected) for expected in possible)
+
+
+def test_build_empirical_macro_action_bank_respects_episode_boundaries():
+    model = make_test_hijepa(dim=4)
+    actions = np.arange(40, dtype=np.float32).reshape(10, 4)
+    episode_idx = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1], dtype=np.int64)
+    step_idx = np.array([0, 1, 2, 3, 4, 0, 1, 2, 3, 4], dtype=np.int64)
+    dataset = FakeDataset(actions, episode_idx=episode_idx, step_idx=step_idx)
+    cfg = {"enabled": True, "num_sequences": 16, "chunk_len": 2}
+
+    bank = build_empirical_macro_action_bank(
+        model=model,
+        dataset=dataset,
+        cfg=cfg,
+        high_horizon=2,
+        high_action_block=1,
+        seed=17,
+    )
+
+    valid_starts = {0, 1, 5, 6}
+    assert set(bank["row_indices"].tolist()).issubset(valid_starts)
+    possible = np.stack(
+        [
+            np.stack([actions[start : start + 2].mean(axis=0), actions[start + 2 : start + 4].mean(axis=0)])
+            for start in sorted(valid_starts)
+        ]
+    )
+    for seq in bank["actions"]:
+        assert any(np.allclose(seq, expected) for expected in possible)
+
+
 @dataclass
 class DummyPlanConfig:
     horizon: int
@@ -347,6 +478,90 @@ class DummyEnv:
     def __init__(self, num_envs: int, action_dim: int):
         self.num_envs = num_envs
         self.action_space = DummyActionSpace((num_envs, action_dim))
+
+
+def make_build_policy_cfg(*, mode: str, empirical_enabled: bool):
+    planning = {
+        "mode": mode,
+        "high": {
+            "replan_interval": 5,
+            "solver": {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "batch_size": 1,
+                "num_samples": 4,
+                "var_scale": 1.0,
+                "n_steps": 2,
+                "topk": 2,
+                "device": "cpu",
+                "seed": 7,
+            },
+            "plan_config": {
+                "horizon": 2,
+                "receding_horizon": 1,
+                "action_block": 1,
+            },
+            "latent_prior": {
+                "enabled": False,
+            },
+            "empirical_macro": {
+                "enabled": empirical_enabled,
+                "num_sequences": 4,
+                "chunk_len": 2,
+                "residual_scale": 0.1,
+                "min_residual_std": 1.0e-3,
+                "return_top_candidates": 2,
+                "encode_batch_size": 8,
+                "stage_sampling": "sequence",
+                "seed": 7,
+            },
+        },
+        "low": {
+            "solver": {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "batch_size": 1,
+                "num_samples": 4,
+                "var_scale": 1.0,
+                "n_steps": 2,
+                "topk": 2,
+                "device": "cpu",
+                "seed": 7,
+            },
+            "plan_config": {
+                "horizon": 2,
+                "receding_horizon": 1,
+                "action_block": 1,
+            },
+        },
+    }
+    if mode == "hierarchical_staged":
+        planning["staged"] = {
+            "stage_duration_steps": 3,
+        }
+
+    return OmegaConf.create(
+        {
+            "seed": 7,
+            "eval": {
+                "goal_offset_steps": 10,
+            },
+            "planning": planning,
+            "plan_config": {
+                "horizon": 1,
+                "receding_horizon": 1,
+                "action_block": 1,
+            },
+            "solver": {
+                "_target_": "stable_worldmodel.solver.CEMSolver",
+                "batch_size": 1,
+                "num_samples": 4,
+                "var_scale": 1.0,
+                "n_steps": 2,
+                "topk": 2,
+                "device": "cpu",
+                "seed": 7,
+            },
+        }
+    )
 
 
 class FakeSolver:
@@ -375,6 +590,129 @@ class FakeSolver:
         return {"actions": actions}
 
 
+def test_empirical_macro_action_solver_returns_candidate_actions():
+    class CheckingCostModel:
+        def __init__(self):
+            self.planner_levels = []
+
+        def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+            self.planner_levels.append(info_dict["planner_level"])
+            target = info_dict["z_goal"].to(action_candidates.device)
+            return (action_candidates[:, :, -1, :] - target).pow(2).sum(dim=-1)
+
+    model = CheckingCostModel()
+    macro_bank = np.array([[[1.0, 2.0, 3.0, 4.0]]], dtype=np.float32)
+    solver = EmpiricalMacroActionSolver(
+        model=model,
+        macro_bank=macro_bank,
+        batch_size=1,
+        num_samples=4,
+        n_steps=1,
+        topk=2,
+        residual_scale=0.0,
+        return_top_candidates=2,
+        seed=3,
+    )
+    solver.configure(
+        action_space=DummyActionSpace((1, 4)),
+        n_envs=1,
+        config=DummyPlanConfig(horizon=1, receding_horizon=1, action_block=1),
+    )
+    z_init = torch.zeros(1, 4)
+    z_goal = torch.as_tensor(macro_bank[:, 0, :])
+
+    out = solver({"planner_level": "high", "z_init": z_init, "z_goal": z_goal})
+
+    torch.testing.assert_close(out["actions"], torch.as_tensor(macro_bank))
+    assert out["candidate_actions"].shape == (1, 2, 1, 4)
+    assert out["candidate_costs"].shape == (1, 2)
+    torch.testing.assert_close(out["candidate_actions"][0, 0], torch.as_tensor(macro_bank[0]))
+    assert model.planner_levels == ["high"]
+
+
+def test_empirical_macro_action_solver_returns_best_sampled_candidate_not_elite_mean():
+    class TargetCostModel:
+        def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+            del info_dict
+            target = torch.tensor([0.0, 0.0], device=action_candidates.device)
+            return (action_candidates[:, :, -1, :] - target).pow(2).sum(dim=-1)
+
+    macro_bank = np.array(
+        [
+            [[0.0, 0.0]],
+            [[2.0, 2.0]],
+        ],
+        dtype=np.float32,
+    )
+    solver = EmpiricalMacroActionSolver(
+        model=TargetCostModel(),
+        macro_bank=macro_bank,
+        batch_size=1,
+        num_samples=2,
+        n_steps=1,
+        topk=2,
+        residual_scale=0.0,
+        return_top_candidates=2,
+        seed=5,
+    )
+    solver.configure(
+        action_space=DummyActionSpace((1, 2)),
+        n_envs=1,
+        config=DummyPlanConfig(horizon=1, receding_horizon=1, action_block=1),
+    )
+    solver._sample_base_indices = lambda **kwargs: torch.tensor([[0, 1]], device=solver.device)
+
+    out = solver(
+        {
+            "planner_level": "high",
+            "z_init": torch.zeros(1, 2),
+            "z_goal": torch.zeros(1, 2),
+        }
+    )
+
+    torch.testing.assert_close(out["actions"], torch.tensor([[[0.0, 0.0]]]))
+    torch.testing.assert_close(out["candidate_actions"][0, 0], torch.tensor([[0.0, 0.0]]))
+    torch.testing.assert_close(out["candidate_actions"][0, 1], torch.tensor([[2.0, 2.0]]))
+    assert not torch.allclose(out["actions"], out["candidate_actions"].mean(dim=1))
+
+
+def test_empirical_macro_action_solver_independent_stage_sampling_combines_stages():
+    class TargetCostModel:
+        def get_cost(self, info_dict: dict, action_candidates: torch.Tensor) -> torch.Tensor:
+            del info_dict
+            target = torch.tensor([[1.0, 1.0], [200.0, 200.0]], device=action_candidates.device)
+            return (action_candidates - target.view(1, 1, 2, 2)).pow(2).sum(dim=(-1, -2))
+
+    macro_bank = np.array(
+        [
+            [[1.0, 1.0], [100.0, 100.0]],
+            [[2.0, 2.0], [200.0, 200.0]],
+        ],
+        dtype=np.float32,
+    )
+    solver = EmpiricalMacroActionSolver(
+        model=TargetCostModel(),
+        macro_bank=macro_bank,
+        batch_size=1,
+        num_samples=128,
+        n_steps=1,
+        topk=1,
+        residual_scale=0.0,
+        stage_sampling="independent",
+        seed=9,
+    )
+    solver.configure(
+        action_space=DummyActionSpace((1, 2)),
+        n_envs=1,
+        config=DummyPlanConfig(horizon=2, receding_horizon=1, action_block=1),
+    )
+
+    out = solver({"planner_level": "high", "z_init": torch.zeros(1, 2), "z_goal": torch.zeros(1, 2)})
+
+    expected = torch.tensor([[[1.0, 1.0], [200.0, 200.0]]])
+    torch.testing.assert_close(out["actions"], expected)
+
+
 class FakePolicyModel(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
@@ -392,6 +730,56 @@ class FakePolicyModel(nn.Module):
         if latent_actions.ndim == 3:
             latent_actions = latent_actions.unsqueeze(1)
         return latent_actions.cumsum(dim=2) + z_init.unsqueeze(1).unsqueeze(2)
+
+
+def test_build_policy_hierarchical_keeps_cem_when_empirical_macro_disabled():
+    cfg = make_build_policy_cfg(mode="hierarchical", empirical_enabled=False)
+    model = make_test_hijepa(dim=4)
+    dataset = FakeDataset(np.random.default_rng(0).normal(size=(32, 4)).astype(np.float32))
+
+    policy = build_policy(cfg, model, dataset, process={}, transform={})
+
+    assert isinstance(policy, HierarchicalWorldModelPolicy)
+    assert isinstance(policy.high_solver, swm.solver.CEMSolver)
+    assert isinstance(policy.low_solver, swm.solver.CEMSolver)
+
+
+def test_build_policy_hierarchical_switches_only_high_solver_when_empirical_macro_enabled():
+    cfg = make_build_policy_cfg(mode="hierarchical", empirical_enabled=True)
+    model = make_test_hijepa(dim=4)
+    dataset = FakeDataset(np.random.default_rng(1).normal(size=(32, 4)).astype(np.float32))
+
+    policy = build_policy(cfg, model, dataset, process={}, transform={})
+
+    assert isinstance(policy, HierarchicalWorldModelPolicy)
+    assert isinstance(policy.high_solver, EmpiricalMacroActionSolver)
+    assert isinstance(policy.low_solver, swm.solver.CEMSolver)
+    assert tuple(policy.high_solver.macro_bank.shape) == (4, 2, 4)
+
+
+def test_build_policy_staged_keeps_cem_when_empirical_macro_disabled():
+    cfg = make_build_policy_cfg(mode="hierarchical_staged", empirical_enabled=False)
+    model = make_test_hijepa(dim=4)
+    dataset = FakeDataset(np.random.default_rng(2).normal(size=(32, 4)).astype(np.float32))
+
+    policy = build_policy(cfg, model, dataset, process={}, transform={})
+
+    assert isinstance(policy, StagedHierarchicalWorldModelPolicy)
+    assert isinstance(policy.high_solver, swm.solver.CEMSolver)
+    assert isinstance(policy.low_solver, swm.solver.CEMSolver)
+
+
+def test_build_policy_staged_switches_only_high_solver_when_empirical_macro_enabled():
+    cfg = make_build_policy_cfg(mode="hierarchical_staged", empirical_enabled=True)
+    model = make_test_hijepa(dim=4)
+    dataset = FakeDataset(np.random.default_rng(3).normal(size=(32, 4)).astype(np.float32))
+
+    policy = build_policy(cfg, model, dataset, process={}, transform={})
+
+    assert isinstance(policy, StagedHierarchicalWorldModelPolicy)
+    assert isinstance(policy.high_solver, EmpiricalMacroActionSolver)
+    assert isinstance(policy.low_solver, swm.solver.CEMSolver)
+    assert tuple(policy.high_solver.macro_bank.shape) == (4, 2, 4)
 
 
 def test_hierarchical_policy_replans_high_and_warm_starts_low():

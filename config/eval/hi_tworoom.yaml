@@ -14,7 +14,7 @@ seed: 42
 policy: hi_lewm
 
 planning:
-  mode: hierarchical # one of: hierarchical, flat
+  mode: hierarchical # one of: hierarchical, hierarchical_staged, flat
   high:
     replan_interval: 5
     solver:
@@ -41,6 +41,16 @@ planning:
       margin_ratio: 0.05
       clamp_abs: 3.0
       fallback_abs: 1.0
+    empirical_macro:
+      enabled: false
+      num_sequences: 4096
+      chunk_len: 5
+      residual_scale: 0.1
+      min_residual_std: 1.0e-3
+      return_top_candidates: 8
+      encode_batch_size: 4096
+      stage_sampling: sequence # sequence or independent
+      seed: ${seed}
   low:
     solver:
       _target_: stable_worldmodel.solver.CEMSolver

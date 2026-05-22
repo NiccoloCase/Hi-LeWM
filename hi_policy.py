@@ -140,6 +140,306 @@ def _sample_valid_chunk_starts(
 
 
 @torch.inference_mode()
+def build_empirical_macro_action_bank(
+    *,
+    model: torch.nn.Module,
+    dataset,
+    cfg,
+    high_horizon: int,
+    high_action_block: int,
+    process: dict[str, Any] | None = None,
+    seed: int = 0,
+) -> dict[str, np.ndarray]:
+    """Encode train-set macro-action sequences for empirical high-level search."""
+    latent_dim = _infer_latent_dim_from_model(model)
+    if not bool(cfg.get("enabled", False)):
+        return {
+            "actions": np.empty((0, int(high_horizon), int(high_action_block) * latent_dim), dtype=np.float32),
+            "num_sequences": np.array(0, dtype=np.int64),
+        }
+    if not hasattr(dataset, "get_col_data"):
+        raise ValueError("Empirical macro-action search requires a dataset with get_col_data.")
+    if not hasattr(model, "encode_macro_actions"):
+        raise ValueError("Empirical macro-action search requires model.encode_macro_actions.")
+
+    action_data = dataset.get_col_data("action")
+    if action_data is None:
+        raise ValueError("Empirical macro-action search requires dataset action data.")
+    action_data = np.asarray(action_data)
+    if action_data.ndim != 2 or action_data.shape[1] <= 0:
+        raise ValueError(f"Expected action data with shape (T, A), got {action_data.shape}.")
+
+    chunk_len = int(cfg.get("chunk_len", 5))
+    num_sequences = int(cfg.get("num_sequences", 4096))
+    high_horizon = int(high_horizon)
+    high_action_block = int(high_action_block)
+    total_macro_tokens = high_horizon * high_action_block
+    if chunk_len <= 0 or num_sequences <= 0 or total_macro_tokens <= 0:
+        raise ValueError("Empirical macro-action chunk_len, num_sequences, and horizon must be positive.")
+
+    valid_mask = ~np.isnan(action_data).any(axis=1)
+    valid_row_idx = np.nonzero(valid_mask)[0]
+    action_data = action_data[valid_mask]
+    episode_ids, step_idx = _try_get_episode_metadata(dataset)
+    if episode_ids is not None:
+        episode_ids = episode_ids[valid_row_idx]
+    if step_idx is not None:
+        step_idx = step_idx[valid_row_idx]
+
+    if process and "action" in process:
+        action_data = process["action"].transform(action_data)
+
+    raw_action_dim = int(action_data.shape[1])
+    expected_action_dim = _infer_macro_input_dim_from_model(model)
+    if expected_action_dim is None:
+        expected_action_dim = raw_action_dim
+    if expected_action_dim < raw_action_dim or expected_action_dim % raw_action_dim != 0:
+        raise ValueError(
+            "Unable to match action dimension for empirical macro-action bank: "
+            f"dataset action dim={raw_action_dim}, model latent-action input dim={expected_action_dim}."
+        )
+
+    raw_group = expected_action_dim // raw_action_dim
+    raw_macro_len = chunk_len * raw_group
+    total_raw_len = total_macro_tokens * raw_macro_len
+    starts = _sample_valid_chunk_starts(
+        episode_ids=episode_ids,
+        step_idx=step_idx,
+        seq_len=action_data.shape[0],
+        chunk_len=total_raw_len,
+        num_chunks=num_sequences,
+        rng=np.random.default_rng(seed),
+    )
+    if starts.size == 0:
+        raise ValueError(
+            "No valid contiguous action spans found for empirical macro-action bank "
+            f"(total_raw_len={total_raw_len})."
+        )
+
+    raw_sequences = np.stack([action_data[s : s + total_raw_len] for s in starts], axis=0)
+    grouped = raw_sequences.reshape(num_sequences, total_macro_tokens, chunk_len, expected_action_dim)
+    flat_chunks = grouped.reshape(num_sequences * total_macro_tokens, chunk_len, expected_action_dim)
+
+    device = next(model.parameters()).device if any(True for _ in model.parameters()) else torch.device("cpu")
+    encode_batch_size = max(1, int(cfg.get("encode_batch_size", 4096)))
+    encoded_batches: list[np.ndarray] = []
+    flat_chunks = flat_chunks.astype(np.float32, copy=False)
+    for start in range(0, flat_chunks.shape[0], encode_batch_size):
+        chunks_t = torch.from_numpy(flat_chunks[start : start + encode_batch_size]).to(device)
+        mask_t = torch.ones((chunks_t.size(0), chunks_t.size(1)), dtype=torch.bool, device=device)
+        encoded_batches.append(model.encode_macro_actions(chunks_t, mask_t).detach().cpu().numpy())
+    latents = np.concatenate(encoded_batches, axis=0)
+    if latents.ndim != 2 or latents.shape[1] != latent_dim:
+        raise ValueError(f"Unexpected encoded macro-action shape: {latents.shape}.")
+
+    actions = latents.reshape(num_sequences, high_horizon, high_action_block * latent_dim)
+    row_indices = valid_row_idx[starts]
+    goal_row_indices = valid_row_idx[starts + total_raw_len - 1]
+    return {
+        "actions": actions.astype(np.float32),
+        "row_indices": row_indices.astype(np.int64),
+        "goal_row_indices": goal_row_indices.astype(np.int64),
+        "num_sequences": np.array(num_sequences, dtype=np.int64),
+        "chunk_len": np.array(chunk_len, dtype=np.int64),
+        "raw_macro_len": np.array(raw_macro_len, dtype=np.int64),
+        "encode_batch_size": np.array(encode_batch_size, dtype=np.int64),
+    }
+
+
+class EmpiricalMacroActionSolver:
+    """High-level solver constrained to train-set macro-action sequences.
+
+    Candidates are sampled as empirical_macro_sequence + residual. The returned
+    action is always the best actual candidate observed, not the residual mean.
+    """
+
+    def __init__(
+        self,
+        *,
+        model,
+        macro_bank: np.ndarray | torch.Tensor,
+        batch_size: int = 1,
+        num_samples: int = 300,
+        var_scale: float = 1.0,
+        n_steps: int = 30,
+        topk: int = 30,
+        device: str | torch.device = "cpu",
+        seed: int = 1234,
+        residual_scale: float = 0.1,
+        min_residual_std: float = 1.0e-3,
+        return_top_candidates: int = 8,
+        stage_sampling: str = "sequence",
+    ) -> None:
+        self.model = model
+        self.batch_size = int(batch_size)
+        self.num_samples = int(num_samples)
+        self.var_scale = float(var_scale)
+        self.n_steps = int(n_steps)
+        self.topk = int(topk)
+        self.device = torch.device(device)
+        self.residual_scale = float(residual_scale)
+        self.min_residual_std = float(min_residual_std)
+        self.return_top_candidates = int(return_top_candidates)
+        self.stage_sampling = str(stage_sampling)
+        if self.stage_sampling not in {"sequence", "independent"}:
+            raise ValueError("stage_sampling must be one of: sequence, independent.")
+        self.torch_gen = torch.Generator(device=self.device).manual_seed(int(seed))
+        self.macro_bank = torch.as_tensor(macro_bank, dtype=torch.float32)
+
+    def configure(self, *, action_space, n_envs: int, config: Any) -> None:
+        self._action_space = action_space
+        self._n_envs = int(n_envs)
+        self._config = config
+        self._action_dim = int(np.prod(action_space.shape[1:]))
+        self._configured = True
+        expected_shape = (int(config.horizon), self.action_dim)
+        if self.macro_bank.ndim != 3 or tuple(self.macro_bank.shape[1:]) != expected_shape:
+            raise ValueError(
+                "Empirical macro bank must have shape (N, horizon, action_dim), "
+                f"expected (*, {expected_shape[0]}, {expected_shape[1]}), "
+                f"got {tuple(self.macro_bank.shape)}."
+            )
+
+    @property
+    def n_envs(self) -> int:
+        return self._n_envs
+
+    @property
+    def action_dim(self) -> int:
+        return self._action_dim * int(self._config.action_block)
+
+    @property
+    def horizon(self) -> int:
+        return int(self._config.horizon)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> dict:
+        return self.solve(*args, **kwargs)
+
+    def _sample_base_indices(
+        self,
+        *,
+        current_bs: int,
+        bank_size: int,
+    ) -> torch.Tensor:
+        index_shape = (
+            (current_bs, self.num_samples, self.horizon)
+            if self.stage_sampling == "independent"
+            else (current_bs, self.num_samples)
+        )
+        return torch.randint(
+            bank_size,
+            index_shape,
+            generator=self.torch_gen,
+            device=self.device,
+        )
+
+    def _gather_base_actions(self, bank: torch.Tensor, base_idx: torch.Tensor) -> torch.Tensor:
+        if self.stage_sampling == "sequence":
+            return bank[base_idx]
+        stage_idx = torch.arange(self.horizon, device=self.device).view(1, 1, self.horizon)
+        stage_idx = stage_idx.expand(base_idx.shape)
+        return bank[base_idx, stage_idx]
+
+    @torch.inference_mode()
+    def solve(self, info_dict: dict, init_action: torch.Tensor | None = None) -> dict:
+        import time
+
+        del init_action
+        start_time = time.time()
+        bank = self.macro_bank.to(self.device)
+        if bank.size(0) <= 0:
+            raise ValueError("Empirical macro bank is empty.")
+
+        outputs = {"costs": []}
+        actions_out = torch.zeros(self.n_envs, self.horizon, self.action_dim, device=self.device)
+        top_n = max(1, min(self.return_top_candidates, self.num_samples, self.topk))
+        top_actions_out = torch.zeros(
+            self.n_envs,
+            top_n,
+            self.horizon,
+            self.action_dim,
+            device=self.device,
+        )
+        top_costs_out = torch.full((self.n_envs, top_n), float("inf"), device=self.device)
+
+        for start_idx in range(0, self.n_envs, self.batch_size):
+            end_idx = min(start_idx + self.batch_size, self.n_envs)
+            current_bs = end_idx - start_idx
+            residual_mean = torch.zeros(
+                current_bs,
+                self.horizon,
+                self.action_dim,
+                device=self.device,
+            )
+            residual_std = torch.full_like(residual_mean, self.residual_scale * self.var_scale)
+
+            expanded_infos = {}
+            for k, v in info_dict.items():
+                if torch.is_tensor(v):
+                    v_batch = v[start_idx:end_idx].to(self.device)
+                    v_batch = v_batch.unsqueeze(1).expand(current_bs, self.num_samples, *v_batch.shape[1:])
+                elif isinstance(v, np.ndarray):
+                    v_batch = v[start_idx:end_idx]
+                    v_batch = np.repeat(v_batch[:, None, ...], self.num_samples, axis=1)
+                else:
+                    v_batch = v
+                expanded_infos[k] = v_batch
+
+            best_costs = torch.full((current_bs, top_n), float("inf"), device=self.device)
+            best_actions = torch.zeros(
+                current_bs,
+                top_n,
+                self.horizon,
+                self.action_dim,
+                device=self.device,
+            )
+
+            for _ in range(self.n_steps):
+                base_idx = self._sample_base_indices(
+                    current_bs=current_bs,
+                    bank_size=bank.size(0),
+                )
+                base = self._gather_base_actions(bank, base_idx)
+                residual = torch.randn(
+                    current_bs,
+                    self.num_samples,
+                    self.horizon,
+                    self.action_dim,
+                    generator=self.torch_gen,
+                    device=self.device,
+                )
+                residual = residual * residual_std.unsqueeze(1) + residual_mean.unsqueeze(1)
+                residual[:, 0] = 0.0
+                candidates = base + residual
+                costs = self.model.get_cost(expanded_infos.copy(), candidates)
+
+                _, topk_inds = torch.topk(costs, k=self.topk, dim=1, largest=False)
+                batch_indices = torch.arange(current_bs, device=self.device).unsqueeze(1).expand(-1, self.topk)
+                elite_actions = candidates[batch_indices, topk_inds]
+                elite_base = base[batch_indices, topk_inds]
+                elite_residual = elite_actions - elite_base
+                residual_mean = elite_residual.mean(dim=1)
+                residual_std = elite_residual.std(dim=1, unbiased=False).clamp_min(self.min_residual_std)
+
+                combined_costs = torch.cat([best_costs, costs], dim=1)
+                combined_actions = torch.cat([best_actions, candidates], dim=1)
+                best_costs, best_inds = torch.topk(combined_costs, k=top_n, dim=1, largest=False)
+                gather_idx = best_inds[:, :, None, None].expand(-1, -1, self.horizon, self.action_dim)
+                best_actions = torch.gather(combined_actions, dim=1, index=gather_idx)
+
+            actions_out[start_idx:end_idx] = best_actions[:, 0]
+            top_actions_out[start_idx:end_idx] = best_actions
+            top_costs_out[start_idx:end_idx] = best_costs
+            outputs["costs"].extend(best_costs[:, 0].detach().cpu().tolist())
+
+        outputs["actions"] = actions_out.detach().cpu()
+        outputs["candidate_actions"] = top_actions_out.detach().cpu()
+        outputs["candidate_costs"] = top_costs_out.detach().cpu()
+        print(f"Empirical macro solve time: {time.time() - start_time:.4f} seconds")
+        return outputs
+
+
+@torch.inference_mode()
 def calibrate_latent_prior(
     *,
     model: torch.nn.Module,
