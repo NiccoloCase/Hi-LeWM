@@ -16,6 +16,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from hi_jepa import HiJEPA
+from hi_module import LatentActionEncoder
+from hi_vq import VQActionEncoder
 
 
 def _load_hi_train_functions():
@@ -29,6 +31,9 @@ def _load_hi_train_functions():
         "build_action_chunks",
         "build_action_chunks_batched",
         "is_p2_frozen_optimization_enabled",
+        "encode_macro_actions_with_aux",
+        "add_macro_action_aux_losses",
+        "build_macro_action_encoder",
         "build_p2_frozen_waypoint_collate",
         "hi_lejepa_forward",
         "hi_lejepa_forward_p2_frozen",
@@ -39,7 +44,13 @@ def _load_hi_train_functions():
         if isinstance(node, ast.FunctionDef) and node.name in wanted:
             chunks.append(ast.get_source_segment(source, node))
 
-    ns = {"torch": torch, "deepcopy": deepcopy, "default_collate": default_collate}
+    ns = {
+        "torch": torch,
+        "deepcopy": deepcopy,
+        "default_collate": default_collate,
+        "LatentActionEncoder": LatentActionEncoder,
+        "VQActionEncoder": VQActionEncoder,
+    }
     exec("\n\n".join(chunks), ns)
     return ns
 
@@ -51,6 +62,7 @@ BUILD_ACTION_CHUNKS_BATCHED = _HI_NS["build_action_chunks_batched"]
 HI_LEJEPA_FORWARD = _HI_NS["hi_lejepa_forward"]
 HI_LEJEPA_FORWARD_P2_FROZEN = _HI_NS["hi_lejepa_forward_p2_frozen"]
 IS_P2_FROZEN_OPT_ENABLED = _HI_NS["is_p2_frozen_optimization_enabled"]
+BUILD_MACRO_ACTION_ENCODER = _HI_NS["build_macro_action_encoder"]
 BUILD_P2_FROZEN_WAYPOINT_COLLATE = _HI_NS["build_p2_frozen_waypoint_collate"]
 CLONE_PROJECTION_HEAD = _HI_NS["clone_projection_head"]
 
@@ -171,6 +183,21 @@ class DummyModule:
         self.logged.append((metrics, on_step, sync_dist))
 
 
+class DummyVQModel(DummyModel):
+    def encode_macro_actions_with_info(self, action_chunks: torch.Tensor, action_mask: torch.Tensor):
+        macro_actions = super().encode_macro_actions(action_chunks, action_mask)
+        device = action_chunks.device
+        dtype = action_chunks.dtype
+        return {
+            "macro_actions": macro_actions,
+            "recon_loss": torch.tensor(2.0, device=device, dtype=dtype),
+            "commitment_loss": torch.tensor(3.0, device=device, dtype=dtype),
+            "codebook_loss": torch.tensor(4.0, device=device, dtype=dtype),
+            "perplexity": torch.tensor(5.0, device=device, dtype=dtype),
+            "active_codes": torch.tensor(6.0, device=device, dtype=dtype),
+        }
+
+
 def _sample_waypoints_stub(_cfg, batch_size: int, seq_len: int, device):
     assert seq_len >= 11
     base = torch.tensor([2, 4, 6, 8, 10], device=device, dtype=torch.long)
@@ -195,6 +222,11 @@ def _make_cfg(*, train_low_level: bool, sigreg_weight: float):
         loss=Node(
             alpha=0.0,
             beta=1.0,
+            vq=Node(
+                recon_weight=1.0,
+                commitment_weight=0.25,
+                codebook_weight=1.0,
+            ),
             sigreg=Node(weight=float(sigreg_weight)),
         ),
         wm=Node(
@@ -307,6 +339,10 @@ def test_hi_lejepa_forward_fast_path_shapes_and_single_macro_encode():
     assert model.last_flat_actions_shape[0] == 2 * 4
     assert model.last_flat_mask_shape[0] == 2 * 4
     assert torch.isfinite(out["loss"])
+    assert out["vq_recon_loss"].item() == 0.0
+    assert out["vq_commitment_loss"].item() == 0.0
+    assert out["vq_codebook_loss"].item() == 0.0
+    assert out["vq_loss"].item() == 0.0
 
 
 def test_hi_lejepa_forward_sigreg_guard_uses_full_sequence_encode():
@@ -344,6 +380,50 @@ def test_hi_lejepa_forward_smoke_multiple_steps_logs_metrics():
         assert torch.isfinite(out["loss"])
 
     assert len(module.logged) == 3
+
+
+def test_hi_lejepa_forward_accumulates_vq_aux_losses():
+    HI_LEJEPA_FORWARD.__globals__["sample_waypoints"] = _sample_waypoints_stub
+
+    model = DummyVQModel(embed_dim=8, latent_dim=5)
+    module = DummyModule(model)
+    cfg = _make_cfg(train_low_level=False, sigreg_weight=0.0)
+
+    batch = {
+        "pixels": torch.randn(2, 12, 3, 4, 4),
+        "action": torch.randn(2, 12, 6),
+    }
+
+    out = HI_LEJEPA_FORWARD(module, batch, "train", cfg)
+
+    assert out["vq_recon_loss"].item() == 2.0
+    assert out["vq_commitment_loss"].item() == 3.0
+    assert out["vq_codebook_loss"].item() == 4.0
+    assert out["vq_perplexity"].item() == 5.0
+    assert out["vq_active_codes"].item() == 6.0
+    assert out["vq_loss"].item() == pytest.approx(6.75)
+
+
+def test_build_macro_action_encoder_respects_config_type():
+    cfg = Node(
+        latent_action_encoder=Node(
+            type="continuous",
+            model_dim=32,
+            num_layers=1,
+            num_heads=4,
+            mlp_dim=64,
+            dropout=0.0,
+            max_seq_len=8,
+            vq=Node(num_codes=16, decoder_hidden_dim=32),
+        )
+    )
+
+    continuous = BUILD_MACRO_ACTION_ENCODER(cfg, input_dim=6, latent_dim=5)
+    assert isinstance(continuous, LatentActionEncoder)
+
+    cfg.latent_action_encoder.type = "vq"
+    quantized = BUILD_MACRO_ACTION_ENCODER(cfg, input_dim=6, latent_dim=5)
+    assert isinstance(quantized, VQActionEncoder)
 
 
 def test_is_p2_frozen_optimization_enabled_matches_expected_modes():

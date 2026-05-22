@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 from hi_jepa import HiJEPA
 from hi_policy import HierarchicalWorldModelPolicy, StagedHierarchicalWorldModelPolicy, calibrate_latent_prior
+from hi_vq import VectorQuantizer
 
 
 class _EncOut:
@@ -75,6 +76,23 @@ class MeanLatentActionEncoder(nn.Module):
         else:
             pooled = x.mean(dim=1)
         return self.output_proj(pooled)
+
+
+class RoundingLatentActionEncoder(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.latent_dim = dim
+
+    def forward(self, x: torch.Tensor, action_mask: torch.Tensor | None = None) -> torch.Tensor:
+        x = x.float()
+        if action_mask is not None:
+            mask = action_mask.to(x.dtype).unsqueeze(-1)
+            denom = mask.sum(dim=1).clamp(min=1.0)
+            return (x * mask).sum(dim=1) / denom
+        return x.mean(dim=1)
+
+    def quantize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        return torch.round(latents)
 
 
 class ScaleProjection(nn.Module):
@@ -188,6 +206,54 @@ def test_hijepa_rollout_shapes():
     low_actions = torch.randn(2, 3, 6, 4)
     low = model.rollout_low(z_hist, None, low_actions)
     assert low.shape == (2, 3, 6, 4)
+
+
+def test_rollout_high_quantizes_planner_latents_when_supported():
+    dim = 3
+    model = HiJEPA(
+        encoder=DummyVisionEncoder(dim),
+        low_predictor=AdditivePredictor(dim),
+        action_encoder=IdentityActionEncoder(dim),
+        high_predictor=AdditivePredictor(dim),
+        latent_action_encoder=RoundingLatentActionEncoder(dim),
+        macro_to_condition=nn.Identity(),
+        projector=nn.Identity(),
+        low_pred_proj=nn.Identity(),
+        high_pred_proj=nn.Identity(),
+    )
+
+    z_init = torch.zeros(1, dim)
+    latent_actions = torch.tensor([[[0.49, 1.51, -0.49]]])
+    pred = model.rollout_high(z_init, latent_actions)
+
+    expected = torch.tensor([[[[0.0, 2.0, 0.0]]]])
+    assert torch.allclose(pred, expected)
+
+
+def test_vector_quantizer_supports_codebook_helpers():
+    quantizer = VectorQuantizer(num_codes=3, code_dim=2)
+    with torch.no_grad():
+        quantizer.codebook.weight.copy_(
+            torch.tensor(
+                [
+                    [1.0, 0.0],
+                    [0.0, 2.0],
+                    [-1.0, 0.5],
+                ]
+            )
+        )
+
+    probs = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 0.25, 0.75]]])
+    latents = quantizer.code_probs_to_latents(probs)
+    expected = torch.tensor([[[1.0, 0.0], [-0.75, 0.875]]])
+    assert torch.allclose(latents, expected)
+
+    indices = torch.tensor([[2, 1]])
+    selected = quantizer.codes_to_latents(indices)
+    assert torch.allclose(selected, torch.tensor([[[-1.0, 0.5], [0.0, 2.0]]]))
+
+    recovered = quantizer.latents_to_codes(selected)
+    assert torch.equal(recovered, indices)
 
 
 def test_get_cost_high_zero_for_matching_goal():
