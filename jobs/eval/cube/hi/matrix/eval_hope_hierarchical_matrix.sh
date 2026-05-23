@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Array-driven hope hierarchical matrix sweep for PushT checkpoints.
+# Array-driven hope hierarchical matrix sweep for Cube checkpoints.
 #
 # Sweep source:
 # - Config rows come from full_hierarchical_matrix_sweep.csv by default
@@ -15,7 +15,7 @@
 #   overrides and clears CUDA visibility only when cpu mode is selected.
 #
 # Submit with:
-#   cd /gpfs/home2/scur0200/main/jobs/eval/hi/matrix
+#   cd /gpfs/home2/scur0200/main/jobs/eval/cube/hi/matrix
 #   ./submit_hope_hierarchical_matrix.sh
 
 #SBATCH --partition=rome
@@ -23,7 +23,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=12:00:00
-#SBATCH --chdir=/gpfs/home2/scur0200/main/jobs/eval/hi/matrix
+#SBATCH --chdir=/gpfs/home2/scur0200/main/jobs/eval/cube/hi/matrix
 #SBATCH --output=eval_hope_hierarchical_matrix_%A_%a.out
 #SBATCH --error=eval_hope_hierarchical_matrix_%A_%a.err
 
@@ -35,8 +35,8 @@ resolve_matrix_dir() {
     "${MATRIX_DIR:-}" \
     "${SLURM_SUBMIT_DIR:-}" \
     "${PWD:-}" \
-    "${PROJECT_ROOT:-}/jobs/eval/hi/matrix" \
-    "/gpfs/home2/${USER}/main/jobs/eval/hi/matrix"; do
+    "${PROJECT_ROOT:-}/jobs/eval/cube/hi/matrix" \
+    "/gpfs/home2/${USER}/main/jobs/eval/cube/hi/matrix"; do
     [[ -z "${c}" ]] && continue
     if p="$(cd "${c}" >/dev/null 2>&1 && pwd)"; then
       if [[ -f "${p}/eval_hope_hierarchical_matrix.sh" && -f "${p}/checkpoints_hope_hierarchical.txt" ]]; then
@@ -90,7 +90,7 @@ export PROJECT_ROOT="${PROJECT_ROOT:-${PROJECT_ROOT_DEFAULT}}"
 
 CHECKPOINT_FILE="${CHECKPOINT_FILE:-${MATRIX_DIR_RESOLVED}/checkpoints_hope_hierarchical.txt}"
 SWEEP_FILE="${SWEEP_FILE:-${MATRIX_DIR_RESOLVED}/full_hierarchical_matrix_sweep.csv}"
-BASE_SCRIPT="${BASE_SCRIPT:-${MATRIX_DIR_RESOLVED}/run_hi_pusht_matrix_eval.sh}"
+BASE_SCRIPT="${BASE_SCRIPT:-${MATRIX_DIR_RESOLVED}/run_hi_cube_matrix_eval.sh}"
 
 if [[ ! -f "${CHECKPOINT_FILE}" ]]; then
   echo "ERROR: checkpoint list not found: ${CHECKPOINT_FILE}" >&2
@@ -196,7 +196,7 @@ LABEL="cfg$(printf '%02d' "${CONFIG_INDEX}")_${GOAL_SLUG}_${MODE_TAG}_hh${HIGH_H
 export RUN_NAME
 export CHECKPOINT_EPOCH
 export MODEL_LABEL
-export CONFIG_NAME="${CONFIG_NAME:-hi_pusht}"
+export CONFIG_NAME="${CONFIG_NAME:-hi_cube}"
 export PLANNING_MODE="${PLANNING_MODE_VALUE}"
 export NUM_EVAL=50
 export EVAL_DEVICE="${EVAL_DEVICE:-cpu}"

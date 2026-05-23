@@ -105,6 +105,7 @@ TRAIN_RUN_NAME="${TRAIN_RUN_NAME:-hi_decoder_probe_${MODE}_${SLURM_JOB_ID:-manua
 WANDB_RUN_ID="${WANDB_RUN_ID:-run_${SLURM_JOB_ID:-manual}}"
 IMAGE_LOG_INTERVAL="${IMAGE_LOG_INTERVAL:-1}"
 INIT_DECODER_CKPT="${INIT_DECODER_CKPT:-}"
+RESUME_FROM_CKPT="${RESUME_FROM_CKPT:-}"
 LIMIT_TRAIN_BATCHES="${LIMIT_TRAIN_BATCHES:-}"
 LIMIT_VAL_BATCHES="${LIMIT_VAL_BATCHES:-}"
 
@@ -146,6 +147,9 @@ echo "Image log interval: ${IMAGE_LOG_INTERVAL}"
 if [[ -n "${INIT_DECODER_CKPT}" ]]; then
   echo "Init decoder checkpoint: ${INIT_DECODER_CKPT}"
 fi
+if [[ -n "${RESUME_FROM_CKPT}" ]]; then
+  echo "Resume checkpoint: ${RESUME_FROM_CKPT}"
+fi
 
 mkdir -p "$(dirname "${LOCAL_DATASET}")" "$(dirname "${LOCAL_HOPE2_CKPT}")" "${PERSIST_RUN_DIR}"
 rsync -ah --info=progress2 "${SRC_DATASET}" "${LOCAL_DATASET}"
@@ -169,6 +173,9 @@ CMD=(
 
 if [[ -n "${INIT_DECODER_CKPT}" ]]; then
   CMD+=("probe.init_decoder_checkpoint=${INIT_DECODER_CKPT}")
+fi
+if [[ -n "${RESUME_FROM_CKPT}" ]]; then
+  CMD+=("checkpointing.resume_from=${RESUME_FROM_CKPT}")
 fi
 if [[ -n "${LIMIT_TRAIN_BATCHES}" ]]; then
   CMD+=("trainer.limit_train_batches=${LIMIT_TRAIN_BATCHES}")

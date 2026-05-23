@@ -568,6 +568,12 @@ class InstrumentedStagePolicy(StagedHierarchicalWorldModelPolicy):
         self.high_plan_events: list[dict[str, Any]] = []
         self.low_block_events: list[dict[str, Any]] = []
         self.stage_end_events: list[dict[str, Any]] = []
+        self.stage_end_latents: list[torch.Tensor] = []
+        self.low_block_actual_latents: list[torch.Tensor] = []
+        self.low_block_predicted_latents: list[torch.Tensor] = []
+        self.low_block_target_latents: list[torch.Tensor] = []
+        self.low_block_stage_indices: list[int] = []
+        self.low_block_end_steps: list[int] = []
         self._pending_block: dict[str, Any] | None = None
         self._block_steps_remaining: int = 0
         self._stage_eval_done: set[int] = set()
@@ -580,6 +586,12 @@ class InstrumentedStagePolicy(StagedHierarchicalWorldModelPolicy):
         self.high_plan_events = []
         self.low_block_events = []
         self.stage_end_events = []
+        self.stage_end_latents = []
+        self.low_block_actual_latents = []
+        self.low_block_predicted_latents = []
+        self.low_block_target_latents = []
+        self.low_block_stage_indices = []
+        self.low_block_end_steps = []
         self._pending_block = None
         self._block_steps_remaining = 0
         self._stage_eval_done = set()
@@ -763,6 +775,11 @@ class InstrumentedStagePolicy(StagedHierarchicalWorldModelPolicy):
                     "selected_action_summary": self._pending_block["selected_action_summary"],
                 }
             )
+            self.low_block_actual_latents.append(z_actual.detach().cpu())
+            self.low_block_predicted_latents.append(self._pending_block["predicted_terminal_latent"].detach().cpu())
+            self.low_block_target_latents.append(self._z_subgoal.detach().cpu())
+            self.low_block_stage_indices.append(int(self._pending_block["stage_idx"]))
+            self.low_block_end_steps.append(int(self._steps_total))
             self._pending_block = None
 
         if self._stage_duration_schedule is not None:
@@ -784,6 +801,7 @@ class InstrumentedStagePolicy(StagedHierarchicalWorldModelPolicy):
                         "actual_error_mean": float(mse_mean(z_actual, target).mean().item()),
                     }
                 )
+                self.stage_end_latents.append(z_actual.detach().cpu())
                 self._stage_eval_done.add(stage_idx)
 
     def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
@@ -819,16 +837,40 @@ class InstrumentedHierarchicalPolicy(HierarchicalWorldModelPolicy):
         self.high_plan_events: list[dict[str, Any]] = []
         self.low_block_events: list[dict[str, Any]] = []
         self.step_events: list[dict[str, Any]] = []
+        self.high_plan_current_latents: list[torch.Tensor] = []
+        self.high_plan_goal_latents: list[torch.Tensor] = []
+        self.high_plan_subgoal_latents: list[torch.Tensor] = []
+        self.high_plan_steps: list[int] = []
+        self.low_block_actual_latents: list[torch.Tensor] = []
+        self.low_block_subgoal_latents: list[torch.Tensor] = []
+        self.low_block_high_plan_ids: list[int] = []
+        self.low_block_end_steps: list[int] = []
+        self.step_current_latents: list[torch.Tensor] = []
+        self.step_subgoal_latents: list[torch.Tensor] = []
+        self.step_high_plan_ids: list[int] = []
         self._pending_block: dict[str, Any] | None = None
         self._block_steps_remaining: int = 0
+        self._current_high_plan_id: int | None = None
 
     def set_env(self, env: Any) -> None:
         super().set_env(env)
         self.high_plan_events = []
         self.low_block_events = []
         self.step_events = []
+        self.high_plan_current_latents = []
+        self.high_plan_goal_latents = []
+        self.high_plan_subgoal_latents = []
+        self.high_plan_steps = []
+        self.low_block_actual_latents = []
+        self.low_block_subgoal_latents = []
+        self.low_block_high_plan_ids = []
+        self.low_block_end_steps = []
+        self.step_current_latents = []
+        self.step_subgoal_latents = []
+        self.step_high_plan_ids = []
         self._pending_block = None
         self._block_steps_remaining = 0
+        self._current_high_plan_id = None
 
     def _encode_current_latent(self, info_dict: dict[str, Any]) -> torch.Tensor:
         prepared = self._prepare_info({"pixels": np.array(info_dict["pixels"], copy=True)})
@@ -874,15 +916,21 @@ class InstrumentedHierarchicalPolicy(HierarchicalWorldModelPolicy):
         churn = None
         if prev_subgoal is not None:
             churn = float(mse_mean(prev_subgoal, self._z_subgoal).mean().item())
+        plan_id = len(self.high_plan_events)
         self.high_plan_events.append(
             {
-                "high_plan_id": len(self.high_plan_events),
+                "high_plan_id": plan_id,
                 "step": int(self._steps_total if hasattr(self, "_steps_total") else 0),
                 "subgoal_mean_norm": float(self._z_subgoal.norm(dim=-1).mean().item()),
                 "subgoal_churn_mse": churn,
                 "selected_macro_summary": macro_action_summary(macro_seq, ref),
             }
         )
+        self.high_plan_current_latents.append(z_init.detach().cpu())
+        self.high_plan_goal_latents.append(z_goal.detach().cpu())
+        self.high_plan_subgoal_latents.append(self._z_subgoal.detach().cpu())
+        self.high_plan_steps.append(int(self._steps_total if hasattr(self, "_steps_total") else 0))
+        self._current_high_plan_id = plan_id
 
     @torch.inference_mode()
     def _plan_low(self, *, z_init: torch.Tensor) -> None:
@@ -929,6 +977,7 @@ class InstrumentedHierarchicalPolicy(HierarchicalWorldModelPolicy):
         pred_err = mse_mean(pred, self._z_subgoal)
         self._pending_block = {
             "block_start_step": int(self._steps_since_high),
+            "high_plan_id": int(self._current_high_plan_id) if self._current_high_plan_id is not None else -1,
             "predicted_terminal_error_to_subgoal": pred_err.detach().cpu(),
             "selected_action_summary": action_token_summary(
                 plan,
@@ -950,6 +999,13 @@ class InstrumentedHierarchicalPolicy(HierarchicalWorldModelPolicy):
         )
         z_curr = self._encode_pixels_last(prepared["pixels"].to(self._device()))
         z_goal = self._encode_pixels_last(prepared["goal"].to(self._device()))
+        if self._z_subgoal is None:
+            z_subgoal_cpu = torch.full_like(z_curr.detach().cpu(), torch.nan)
+        else:
+            z_subgoal_cpu = self._z_subgoal.detach().cpu()
+        self.step_current_latents.append(z_curr.detach().cpu())
+        self.step_subgoal_latents.append(z_subgoal_cpu)
+        self.step_high_plan_ids.append(int(self._current_high_plan_id) if self._current_high_plan_id is not None else -1)
         current_to_subgoal = None
         if self._z_subgoal is not None:
             current_to_subgoal = float(mse_mean(z_curr, self._z_subgoal).mean().item())
@@ -972,6 +1028,10 @@ class InstrumentedHierarchicalPolicy(HierarchicalWorldModelPolicy):
                     "selected_action_summary": self._pending_block["selected_action_summary"],
                 }
             )
+            self.low_block_actual_latents.append(z_curr.detach().cpu())
+            self.low_block_subgoal_latents.append(self._z_subgoal.detach().cpu())
+            self.low_block_high_plan_ids.append(int(self._pending_block["high_plan_id"]))
+            self.low_block_end_steps.append(len(self.step_events))
             self._pending_block = None
 
     def get_action(self, info_dict: dict, **kwargs: Any) -> np.ndarray:
@@ -1065,6 +1125,17 @@ def future_index_for_offset(offset_steps: int, future_len: int) -> int:
     if future_len <= 0:
         raise ValueError("future_len must be positive.")
     return max(0, min(int(offset_steps) - 1, future_len - 1))
+
+
+def stack_trace_latents(
+    tensors: Sequence[torch.Tensor],
+    *,
+    num_envs: int,
+    latent_dim: int,
+) -> np.ndarray:
+    if not tensors:
+        return np.empty((0, num_envs, latent_dim), dtype=np.float32)
+    return torch.stack([t.detach().cpu() for t in tensors], dim=0).numpy().astype(np.float32, copy=False)
 
 
 def run_oracle_subgoal_acting(cfg: ActingDiagnosticConfig) -> dict[str, Any]:
@@ -1357,6 +1428,28 @@ def run_generated_subgoal_acting(cfg: ActingDiagnosticConfig) -> dict[str, Any]:
         "goal_latent": batch.goal_latent.detach().cpu().numpy(),
         "final_latent": final_latent.detach().cpu().numpy(),
         "episode_successes": np.asarray(loop["episode_successes"]),
+        "stage_end_actual_latents": stack_trace_latents(
+            policy.stage_end_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "low_block_actual_latents": stack_trace_latents(
+            policy.low_block_actual_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "low_block_predicted_latents": stack_trace_latents(
+            policy.low_block_predicted_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "low_block_target_latents": stack_trace_latents(
+            policy.low_block_target_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "low_block_stage_indices": np.asarray(policy.low_block_stage_indices, dtype=np.int64),
+        "low_block_end_steps": np.asarray(policy.low_block_end_steps, dtype=np.int64),
     }
     return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row, npz_arrays=npz_arrays)
 
@@ -1445,6 +1538,45 @@ def run_online_hierarchical_logging(cfg: ActingDiagnosticConfig) -> dict[str, An
         "start_latent": batch.start_latent.detach().cpu().numpy(),
         "goal_latent": batch.goal_latent.detach().cpu().numpy(),
         "final_latent": final_latent.detach().cpu().numpy(),
+        "high_plan_steps": np.asarray(policy.high_plan_steps, dtype=np.int64),
+        "high_plan_current_latents": stack_trace_latents(
+            policy.high_plan_current_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "high_plan_goal_latents": stack_trace_latents(
+            policy.high_plan_goal_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "high_plan_subgoal_latents": stack_trace_latents(
+            policy.high_plan_subgoal_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "low_block_end_steps": np.asarray(policy.low_block_end_steps, dtype=np.int64),
+        "low_block_high_plan_ids": np.asarray(policy.low_block_high_plan_ids, dtype=np.int64),
+        "low_block_actual_latents": stack_trace_latents(
+            policy.low_block_actual_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "low_block_subgoal_latents": stack_trace_latents(
+            policy.low_block_subgoal_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "step_current_latents": stack_trace_latents(
+            policy.step_current_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "step_subgoal_latents": stack_trace_latents(
+            policy.step_subgoal_latents,
+            num_envs=int(batch.start_latent.shape[0]),
+            latent_dim=int(batch.start_latent.shape[1]),
+        ),
+        "step_high_plan_ids": np.asarray(policy.step_high_plan_ids, dtype=np.int64),
     }
     return finalize_result(ctx, result, tsv_columns=tsv_columns, tsv_row=tsv_row, npz_arrays=npz_arrays)
 

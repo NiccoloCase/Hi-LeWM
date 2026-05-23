@@ -13,9 +13,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CHECKPOINT_FILE="${CHECKPOINT_FILE:-${SCRIPT_DIR}/checkpoints_hope_hierarchical.txt}"
 SWEEP_FILE="${SWEEP_FILE:-${SCRIPT_DIR}/full_hierarchical_matrix_sweep.csv}"
 JOB_SCRIPT="${JOB_SCRIPT:-${SCRIPT_DIR}/eval_hope_hierarchical_matrix.sh}"
-BASE_SCRIPT="${BASE_SCRIPT:-${SCRIPT_DIR}/run_hi_pusht_matrix_eval.sh}"
-SBATCH_PARTITION="${SBATCH_PARTITION:-}"
-SBATCH_GPUS="${SBATCH_GPUS:-}"
+BASE_SCRIPT="${BASE_SCRIPT:-${SCRIPT_DIR}/run_hi_cube_matrix_eval.sh}"
+SBATCH_PARTITION="${SBATCH_PARTITION:-gpu_h100}"
+SBATCH_GPUS="${SBATCH_GPUS:-1}"
 
 if [[ ! -f "${CHECKPOINT_FILE}" ]]; then
   echo "ERROR: checkpoint list not found: ${CHECKPOINT_FILE}" >&2
@@ -65,7 +65,7 @@ echo "Checkpoint file: ${CHECKPOINT_FILE}"
 echo "Sweep file: ${SWEEP_FILE}"
 echo "Job script: ${JOB_SCRIPT}"
 echo "Base script: ${BASE_SCRIPT}"
-echo "Requested eval device: ${EVAL_DEVICE:-<default>}"
+echo "Requested eval device: ${EVAL_DEVICE:-cuda}"
 echo "Requested partition: ${SBATCH_PARTITION:-<script default>}"
 echo "Requested gpus: ${SBATCH_GPUS:-<script default>}"
 echo "Checkpoints: ${NUM_CHECKPOINTS}"
@@ -86,7 +86,7 @@ for i in "${!CHECKPOINT_ROWS[@]}"; do
     --array="1-${NUM_CONFIGS}"
     --output="${LOG_DIR}/eval_hope_hierarchical_matrix_%A_%a.out"
     --error="${LOG_DIR}/eval_hope_hierarchical_matrix_%A_%a.err"
-    --export="ALL,CHECKPOINT_ROW_INDEX=$((i + 1)),BASE_SCRIPT=${BASE_SCRIPT},EVAL_DEVICE=${EVAL_DEVICE:-cpu}"
+    --export="ALL,CHECKPOINT_ROW_INDEX=$((i + 1)),BASE_SCRIPT=${BASE_SCRIPT},EVAL_DEVICE=${EVAL_DEVICE:-cuda}"
   )
 
   if [[ -n "${SBATCH_PARTITION}" ]]; then
