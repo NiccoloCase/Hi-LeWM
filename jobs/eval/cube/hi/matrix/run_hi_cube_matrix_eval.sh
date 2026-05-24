@@ -48,6 +48,15 @@ if ! REPO_ROOT="$(resolve_repo_root)"; then
   exit 2
 fi
 
+COMMON_HELPER="${REPO_ROOT}/jobs/eval/common/determinism_env.sh"
+if [[ ! -f "${COMMON_HELPER}" ]]; then
+  echo "ERROR: determinism helper not found: ${COMMON_HELPER}" >&2
+  exit 2
+fi
+
+# shellcheck source=/dev/null
+source "${COMMON_HELPER}"
+
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
@@ -96,6 +105,11 @@ else
   export PYTHONPATH="${REPO_ROOT}/third_party/lewm:${REPO_ROOT}"
 fi
 
+setup_eval_determinism_env \
+  "${REPO_ROOT}" \
+  "${EVAL_SEED:-42}" \
+  "${EVAL_DETERMINISM:-strict}"
+
 if [[ "${EVAL_DEVICE}" == "cpu" ]]; then
   export CUDA_VISIBLE_DEVICES=""
   export MUJOCO_GL="${MUJOCO_GL:-osmesa}"
@@ -115,6 +129,7 @@ echo "Goal offset steps: ${GOAL_OFFSET_STEPS}"
 echo "Eval budget: ${EVAL_BUDGET}"
 echo "Num eval: ${NUM_EVAL}"
 echo "Eval device: ${EVAL_DEVICE}"
+print_eval_determinism_env
 echo "High-level planner: horizon=${HIGH_HORIZON}, receding=${HIGH_RECEDING_HORIZON}, block=${HIGH_ACTION_BLOCK}, samples=${HIGH_NUM_SAMPLES}, iters=${HIGH_N_STEPS}, topk=${HIGH_TOPK}, replan=${HIGH_REPLAN_INTERVAL}"
 echo "Low-level planner: horizon=${LOW_HORIZON}, receding=${LOW_RECEDING_HORIZON}, block=${LOW_ACTION_BLOCK}, samples=${LOW_NUM_SAMPLES}, iters=${LOW_N_STEPS}, topk=${LOW_TOPK}"
 echo "Output subdir: ${EVAL_SUBDIR}"
@@ -129,6 +144,7 @@ CMD=(
   python hi_eval.py
   --config-name="${CONFIG_NAME}"
   "policy=${POLICY}"
+  "seed=${EVAL_SEED}"
   "planning.mode=${PLANNING_MODE}"
   "eval.num_eval=${NUM_EVAL}"
   "eval.goal_offset_steps=${GOAL_OFFSET_STEPS}"

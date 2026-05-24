@@ -16,6 +16,10 @@ from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 
 import baseline_adapter as _baseline_adapter
+from eval_determinism import (
+    configure_process_determinism,
+    format_determinism_report,
+)
 from hi_policy import (
     EmpiricalMacroActionSolver,
     HierarchicalWorldModelPolicy,
@@ -445,6 +449,12 @@ def build_policy(cfg, model, dataset, process, transform):
 
 @hydra.main(version_base=None, config_path="./config/eval", config_name="hi_pusht")
 def run(cfg: DictConfig):
+    determinism_report = configure_process_determinism(
+        seed=int(cfg.seed),
+        mode=os.environ.get("EVAL_DETERMINISM", "strict"),
+    )
+    print(format_determinism_report(determinism_report))
+
     mode = str(cfg.planning.get("mode", "hierarchical")).lower()
 
     if mode in {"hierarchical", "hierarchical_staged"}:
@@ -578,6 +588,8 @@ def run(cfg: DictConfig):
         f.write("==== CONFIG ====\n")
         f.write(OmegaConf.to_yaml(cfg))
         f.write("\n")
+        f.write("==== DETERMINISM ====\n")
+        f.write(f"{format_determinism_report(determinism_report)}\n")
         f.write("==== RESULTS ====\n")
         f.write(f"metrics: {metrics}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")

@@ -16,6 +16,29 @@ JOB_SCRIPT="${JOB_SCRIPT:-${SCRIPT_DIR}/eval_hope_hierarchical_matrix.sh}"
 BASE_SCRIPT="${BASE_SCRIPT:-${SCRIPT_DIR}/run_hi_cube_matrix_eval.sh}"
 SBATCH_PARTITION="${SBATCH_PARTITION:-gpu_h100}"
 SBATCH_GPUS="${SBATCH_GPUS:-1}"
+SBATCH_ARRAY_SUFFIX="${SBATCH_ARRAY_SUFFIX:-}"
+
+parse_seed_list() {
+  local raw="${1:-42}"
+  local cleaned="${raw//[[:space:]]/}"
+  if [[ -z "${cleaned}" ]]; then
+    echo "ERROR: EVAL_SEEDS is empty." >&2
+    return 1
+  fi
+
+  IFS=',' read -r -a PARSED_SEEDS <<< "${cleaned}"
+  if (( ${#PARSED_SEEDS[@]} == 0 )); then
+    echo "ERROR: EVAL_SEEDS produced no seeds." >&2
+    return 1
+  fi
+
+  for seed in "${PARSED_SEEDS[@]}"; do
+    if ! [[ "${seed}" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: invalid seed '${seed}' in EVAL_SEEDS='${raw}'." >&2
+      return 1
+    fi
+  done
+}
 
 if [[ ! -f "${CHECKPOINT_FILE}" ]]; then
   echo "ERROR: checkpoint list not found: ${CHECKPOINT_FILE}" >&2
@@ -57,6 +80,13 @@ if ! [[ "${NUM_CONFIGS}" =~ ^[0-9]+$ ]] || (( NUM_CONFIGS <= 0 )); then
   exit 7
 fi
 
+if ! parse_seed_list "${EVAL_SEEDS:-42}"; then
+  exit 8
+fi
+NUM_SEEDS="${#PARSED_SEEDS[@]}"
+TOTAL_ARRAY_TASKS=$(( NUM_CONFIGS * NUM_SEEDS ))
+ARRAY_SPEC="1-${TOTAL_ARRAY_TASKS}${SBATCH_ARRAY_SUFFIX}"
+
 mapfile -t CHECKPOINT_ROWS < <(grep -Ev '^[[:space:]]*($|#)' "${CHECKPOINT_FILE}")
 LOG_ROOT="${LOG_ROOT:-${SCRIPT_DIR}/logs_hope_hierarchical_matrix}"
 mkdir -p "${LOG_ROOT}"
@@ -70,6 +100,9 @@ echo "Requested partition: ${SBATCH_PARTITION:-<script default>}"
 echo "Requested gpus: ${SBATCH_GPUS:-<script default>}"
 echo "Checkpoints: ${NUM_CHECKPOINTS}"
 echo "Configs per checkpoint: ${NUM_CONFIGS}"
+echo "Seeds: ${EVAL_SEEDS:-42}"
+echo "Tasks per checkpoint array: ${TOTAL_ARRAY_TASKS}"
+echo "Array spec: ${ARRAY_SPEC}"
 echo "Log root: ${LOG_ROOT}"
 
 for i in "${!CHECKPOINT_ROWS[@]}"; do
@@ -83,7 +116,7 @@ for i in "${!CHECKPOINT_ROWS[@]}"; do
 
   SBATCH_CMD=(
     sbatch
-    --array="1-${NUM_CONFIGS}"
+    --array="${ARRAY_SPEC}"
     --output="${LOG_DIR}/eval_hope_hierarchical_matrix_%A_%a.out"
     --error="${LOG_DIR}/eval_hope_hierarchical_matrix_%A_%a.err"
     --export="ALL,CHECKPOINT_ROW_INDEX=$((i + 1)),BASE_SCRIPT=${BASE_SCRIPT},EVAL_DEVICE=${EVAL_DEVICE:-cuda}"

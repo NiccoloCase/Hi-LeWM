@@ -2,7 +2,7 @@ import os
 import sys
 from pathlib import Path
 
-os.environ["MUJOCO_GL"] = "egl"
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import time
 
@@ -15,6 +15,10 @@ from sklearn import preprocessing
 from torchvision.transforms import v2 as transforms
 import stable_worldmodel as swm
 import baseline_adapter as _baseline_adapter
+from eval_determinism import (
+    configure_process_determinism,
+    format_determinism_report,
+)
 
 
 # LeWM checkpoints were serialized with classes from a top-level `jepa` module.
@@ -129,6 +133,12 @@ def format_episode_outcomes(eval_episodes, eval_start_idx, episode_successes):
     config_name="pusht",
 )
 def run(cfg: DictConfig):
+    determinism_report = configure_process_determinism(
+        seed=int(cfg.seed),
+        mode=os.environ.get("EVAL_DETERMINISM", "strict"),
+    )
+    print(format_determinism_report(determinism_report))
+
     assert (
         cfg.plan_config.horizon * cfg.plan_config.action_block <= cfg.eval.eval_budget
     ), "Planning horizon must be smaller than or equal to eval_budget"
@@ -254,6 +264,8 @@ def run(cfg: DictConfig):
         f.write("==== CONFIG ====\n")
         f.write(OmegaConf.to_yaml(cfg))
         f.write("\n")
+        f.write("==== DETERMINISM ====\n")
+        f.write(f"{format_determinism_report(determinism_report)}\n")
         f.write("==== RESULTS ====\n")
         f.write(f"metrics: {metrics}\n")
         f.write(f"evaluation_time: {end_time - start_time} seconds\n")

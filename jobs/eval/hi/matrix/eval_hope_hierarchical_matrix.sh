@@ -22,7 +22,7 @@
 #SBATCH --job-name=hi_eval_hope_matrix
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=12:00:00
+#SBATCH --time=00:30:00
 #SBATCH --chdir=/gpfs/home2/scur0200/main/jobs/eval/hi/matrix
 #SBATCH --output=eval_hope_hierarchical_matrix_%A_%a.out
 #SBATCH --error=eval_hope_hierarchical_matrix_%A_%a.err
@@ -31,12 +31,7 @@ set -euo pipefail
 
 resolve_matrix_dir() {
   local c p
-  for c in \
-    "${MATRIX_DIR:-}" \
-    "${SLURM_SUBMIT_DIR:-}" \
-    "${PWD:-}" \
-    "${PROJECT_ROOT:-}/jobs/eval/hi/matrix" \
-    "/gpfs/home2/${USER}/main/jobs/eval/hi/matrix"; do
+  for c in     "${MATRIX_DIR:-}"     "${SLURM_SUBMIT_DIR:-}"     "${PWD:-}"     "${PROJECT_ROOT:-}/jobs/eval/hi/matrix"     "/gpfs/home2/${USER}/main/jobs/eval/hi/matrix"; do
     [[ -z "${c}" ]] && continue
     if p="$(cd "${c}" >/dev/null 2>&1 && pwd)"; then
       if [[ -f "${p}/eval_hope_hierarchical_matrix.sh" && -f "${p}/checkpoints_hope_hierarchical.txt" ]]; then
@@ -80,6 +75,28 @@ goal_slug_from_tag() {
   esac
 }
 
+parse_seed_list() {
+  local raw="${1:-42}"
+  local cleaned="${raw//[[:space:]]/}"
+  if [[ -z "${cleaned}" ]]; then
+    echo "ERROR: EVAL_SEEDS is empty." >&2
+    return 1
+  fi
+
+  IFS=',' read -r -a PARSED_SEEDS <<< "${cleaned}"
+  if (( ${#PARSED_SEEDS[@]} == 0 )); then
+    echo "ERROR: EVAL_SEEDS produced no seeds." >&2
+    return 1
+  fi
+
+  for seed in "${PARSED_SEEDS[@]}"; do
+    if ! [[ "${seed}" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: invalid seed '${seed}' in EVAL_SEEDS='${raw}'." >&2
+      return 1
+    fi
+  done
+}
+
 if ! MATRIX_DIR_RESOLVED="$(resolve_matrix_dir)"; then
   echo "ERROR: could not resolve matrix directory." >&2
   exit 2
@@ -114,7 +131,7 @@ mapfile -t SWEEP_ROWS < <(awk '
   /^[[:space:]]*#/ { next }
   /^[[:space:]]*$/ { next }
   {
-    gsub(/\r/, "")
+    gsub(//, "")
     print
   }
 ' "${SWEEP_FILE}")
@@ -122,65 +139,78 @@ mapfile -t SWEEP_ROWS < <(awk '
 NUM_CHECKPOINTS="${#CHECKPOINT_ROWS[@]}"
 NUM_CONFIGS="${#SWEEP_ROWS[@]}"
 
+if ! parse_seed_list "${EVAL_SEEDS:-42}"; then
+  exit 6
+fi
+NUM_SEEDS="${#PARSED_SEEDS[@]}"
+
 if (( NUM_CHECKPOINTS == 0 )); then
   echo "ERROR: no checkpoint rows found in ${CHECKPOINT_FILE}" >&2
-  exit 6
+  exit 7
 fi
 
 if (( NUM_CONFIGS == 0 )); then
   echo "ERROR: no sweep rows found in ${SWEEP_FILE}" >&2
-  exit 7
+  exit 8
 fi
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-}}"
 if [[ -z "${TASK_ID}" ]]; then
   echo "ERROR: SLURM_ARRAY_TASK_ID is not set." >&2
   echo "Submit with ./submit_hope_hierarchical_matrix.sh or pass SLURM_ARRAY_TASK_ID manually." >&2
-  exit 8
+  exit 9
 fi
 
 if [[ -n "${CHECKPOINT_ROW_INDEX:-}" ]]; then
   if ! [[ "${CHECKPOINT_ROW_INDEX}" =~ ^[0-9]+$ ]] || (( CHECKPOINT_ROW_INDEX < 1 || CHECKPOINT_ROW_INDEX > NUM_CHECKPOINTS )); then
     echo "ERROR: CHECKPOINT_ROW_INDEX ${CHECKPOINT_ROW_INDEX} is out of range 1-${NUM_CHECKPOINTS}" >&2
-    exit 9
-  fi
-  if ! [[ "${TASK_ID}" =~ ^[0-9]+$ ]] || (( TASK_ID < 1 || TASK_ID > NUM_CONFIGS )); then
-    echo "ERROR: task id ${TASK_ID} is out of range 1-${NUM_CONFIGS} for per-checkpoint arrays" >&2
     exit 10
   fi
-  CHECKPOINT_INDEX=$(( CHECKPOINT_ROW_INDEX - 1 ))
-  CONFIG_INDEX="${TASK_ID}"
-else
-  if ! [[ "${TASK_ID}" =~ ^[0-9]+$ ]] || (( TASK_ID < 1 || TASK_ID > NUM_CHECKPOINTS * NUM_CONFIGS )); then
-    echo "ERROR: task id ${TASK_ID} is out of range 1-$((NUM_CHECKPOINTS * NUM_CONFIGS))" >&2
+  TOTAL_TASKS=$(( NUM_CONFIGS * NUM_SEEDS ))
+  if ! [[ "${TASK_ID}" =~ ^[0-9]+$ ]] || (( TASK_ID < 1 || TASK_ID > TOTAL_TASKS )); then
+    echo "ERROR: task id ${TASK_ID} is out of range 1-${TOTAL_TASKS} for per-checkpoint arrays" >&2
     exit 11
   fi
-  CHECKPOINT_INDEX=$(( (TASK_ID - 1) / NUM_CONFIGS ))
-  CONFIG_INDEX=$(( (TASK_ID - 1) % NUM_CONFIGS + 1 ))
+  CHECKPOINT_INDEX=$(( CHECKPOINT_ROW_INDEX - 1 ))
+  CONFIG_INDEX=$(( (TASK_ID - 1) / NUM_SEEDS + 1 ))
+  SEED_INDEX=$(( (TASK_ID - 1) % NUM_SEEDS ))
+else
+  TASKS_PER_CHECKPOINT=$(( NUM_CONFIGS * NUM_SEEDS ))
+  TOTAL_TASKS=$(( NUM_CHECKPOINTS * TASKS_PER_CHECKPOINT ))
+  if ! [[ "${TASK_ID}" =~ ^[0-9]+$ ]] || (( TASK_ID < 1 || TASK_ID > TOTAL_TASKS )); then
+    echo "ERROR: task id ${TASK_ID} is out of range 1-${TOTAL_TASKS}" >&2
+    exit 12
+  fi
+  CHECKPOINT_INDEX=$(( (TASK_ID - 1) / TASKS_PER_CHECKPOINT ))
+  TASK_ID_WITHIN_CHECKPOINT=$(( (TASK_ID - 1) % TASKS_PER_CHECKPOINT ))
+  CONFIG_INDEX=$(( TASK_ID_WITHIN_CHECKPOINT / NUM_SEEDS + 1 ))
+  SEED_INDEX=$(( TASK_ID_WITHIN_CHECKPOINT % NUM_SEEDS ))
 fi
+
+EVAL_SEED_VALUE="${PARSED_SEEDS[SEED_INDEX]}"
 
 read -r RUN_NAME CHECKPOINT_EPOCH <<< "${CHECKPOINT_ROWS[CHECKPOINT_INDEX]}"
 if [[ -z "${RUN_NAME:-}" || -z "${CHECKPOINT_EPOCH:-}" ]]; then
   echo "ERROR: invalid checkpoint row: ${CHECKPOINT_ROWS[CHECKPOINT_INDEX]}" >&2
-  exit 12
+  exit 13
 fi
 
 IFS=';' read -r GOAL_OFFSET_TAG CONFIG_NOTE EVAL_BUDGET_CSV HIGH_HORIZON_CSV LOW_HORIZON_CSV HIGH_RECEDING_HORIZON_CSV LOW_RECEDING_HORIZON_CSV HIGH_REPLAN_INTERVAL_CSV HIGH_ACTION_BLOCK_CSV LOW_ACTION_BLOCK_CSV HIGH_NUM_SAMPLES_CSV HIGH_N_STEPS_CSV HIGH_TOPK_CSV LOW_NUM_SAMPLES_CSV LOW_N_STEPS_CSV LOW_TOPK_CSV <<< "${SWEEP_ROWS[CONFIG_INDEX - 1]}"
 
 if ! GOAL_OFFSET_STEPS_VALUE="$(goal_offset_steps_from_tag "${GOAL_OFFSET_TAG}")"; then
   echo "ERROR: unsupported goal_offset tag '${GOAL_OFFSET_TAG}' in row ${CONFIG_INDEX}" >&2
-  exit 13
+  exit 14
 fi
 
 if ! GOAL_SLUG="$(goal_slug_from_tag "${GOAL_OFFSET_TAG}")"; then
   echo "ERROR: unsupported goal_offset tag '${GOAL_OFFSET_TAG}' in row ${CONFIG_INDEX}" >&2
-  exit 14
+  exit 15
 fi
 
 if ! PLANNING_MODE_VALUE="$(normalize_mode "${CONFIG_NOTE}")"; then
   echo "ERROR: unsupported config_note '${CONFIG_NOTE}' in row ${CONFIG_INDEX}" >&2
   echo "Use blank or hiStaged." >&2
-  exit 15
+  exit 16
 fi
 
 MODE_TAG="hier"
@@ -192,6 +222,10 @@ RUN_SHORT="${RUN_NAME#hi_lewm_p2_train_}"
 RUN_SHORT="${RUN_SHORT#hi_lewm_cube_train_}"
 MODEL_LABEL="${RUN_SHORT}_ep${CHECKPOINT_EPOCH}"
 LABEL="cfg$(printf '%02d' "${CONFIG_INDEX}")_${GOAL_SLUG}_${MODE_TAG}_hh${HIGH_HORIZON_CSV}_lh${LOW_HORIZON_CSV}_b${EVAL_BUDGET_CSV}"
+DISPLAY_LABEL="${LABEL}"
+if (( NUM_SEEDS > 1 )); then
+  DISPLAY_LABEL="${LABEL}_seed${EVAL_SEED_VALUE}"
+fi
 
 export RUN_NAME
 export CHECKPOINT_EPOCH
@@ -216,12 +250,16 @@ export HIGH_TOPK="${HIGH_TOPK_CSV}"
 export LOW_NUM_SAMPLES="${LOW_NUM_SAMPLES_CSV}"
 export LOW_N_STEPS="${LOW_N_STEPS_CSV}"
 export LOW_TOPK="${LOW_TOPK_CSV}"
+export EVAL_SEEDS="${EVAL_SEEDS:-42}"
+export EVAL_SEED="${EVAL_SEED_VALUE}"
+export EVAL_DETERMINISM="${EVAL_DETERMINISM:-strict}"
 
-export EVAL_SUBDIR="eval_hope_hierarchical_matrix_${LABEL}_job_${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}_${SLURM_ARRAY_TASK_ID:-${TASK_ID}}"
-export RESULT_FILENAME="${MODEL_LABEL}_${LABEL}_results.txt"
+export EVAL_SUBDIR="eval_hope_hierarchical_matrix_${DISPLAY_LABEL}_job_${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}_${SLURM_ARRAY_TASK_ID:-${TASK_ID}}"
+export RESULT_FILENAME="${MODEL_LABEL}_${DISPLAY_LABEL}_results.txt"
 
 echo "Checkpoint row: $((CHECKPOINT_INDEX + 1)) / ${NUM_CHECKPOINTS}"
 echo "Config row: ${CONFIG_INDEX} / ${NUM_CONFIGS}"
+echo "Task: ${TASK_ID} / ${TOTAL_TASKS}"
 echo "Run name: ${RUN_NAME}"
 echo "Checkpoint epoch: ${CHECKPOINT_EPOCH}"
 echo "Config note: ${CONFIG_NOTE:-<blank>}"
@@ -232,6 +270,10 @@ echo "Eval budget: ${EVAL_BUDGET}"
 echo "Num eval: ${NUM_EVAL}"
 echo "Eval device: ${EVAL_DEVICE}"
 echo "Label: ${LABEL}"
+echo "Display label: ${DISPLAY_LABEL}"
+echo "Seed: ${EVAL_SEED}"
+echo "Seeds in sweep: ${EVAL_SEEDS}"
+echo "Determinism: ${EVAL_DETERMINISM}"
 echo "High planner: horizon=${HIGH_HORIZON}, receding=${HIGH_RECEDING_HORIZON}, block=${HIGH_ACTION_BLOCK}, samples=${HIGH_NUM_SAMPLES}, iters=${HIGH_N_STEPS}, topk=${HIGH_TOPK}, replan=${HIGH_REPLAN_INTERVAL}"
 echo "Low planner: horizon=${LOW_HORIZON}, receding=${LOW_RECEDING_HORIZON}, block=${LOW_ACTION_BLOCK}, samples=${LOW_NUM_SAMPLES}, iters=${LOW_N_STEPS}, topk=${LOW_TOPK}"
 echo "Sweep file: ${SWEEP_FILE}"

@@ -18,24 +18,6 @@
 # - `low_n_steps` -> `solver.n_steps`
 # - `solver.topk` stays at the baseline config default unless overridden manually
 #
-# Cube-specific guardrails:
-# - Uses the single-cube baseline config `third_party/lewm/config/eval/cube.yaml`
-# - Explicitly forces `eval.dataset_name=ogbench/cube_single_expert`
-# - Checks both known single-cube cache layouts under `${STABLEWM_HOME}` and
-#   uses the one that actually exists
-#
-# CPU notes:
-# - The baseline submodule config defaults the solver device to CUDA.
-# - This job forces both the eval wrapper device and solver device to CPU.
-# - `original_eval_with_manifest.py` resolves that device and moves the baseline
-#   model there, so this array can run on `rome` without a GPU.
-#
-# Output layout:
-# - Logs: `jobs/eval/original/cube/matrix/logs/<sweep-name>/`
-# - Eval artifacts: `${STABLEWM_HOME}/cube/<sweep-name>/<task-label>/`
-# - `sweep-name` defaults to a timestamped name, so rerunning the submitter
-#   creates a new non-overwriting folder by default.
-#
 # Submit with:
 #   cd /gpfs/home2/scur0200/main/jobs/eval/original/cube/matrix
 #   ./submit_baseline_matrix.sh
@@ -53,12 +35,7 @@ set -euo pipefail
 
 resolve_matrix_dir() {
   local candidate resolved
-  for candidate in \
-    "${MATRIX_DIR:-}" \
-    "${SLURM_SUBMIT_DIR:-}" \
-    "${PWD:-}" \
-    "${PROJECT_ROOT:-}/jobs/eval/original/cube/matrix" \
-    "/gpfs/home2/${USER}/main/jobs/eval/original/cube/matrix"; do
+  for candidate in     "${MATRIX_DIR:-}"     "${SLURM_SUBMIT_DIR:-}"     "${PWD:-}"     "${PROJECT_ROOT:-}/jobs/eval/original/cube/matrix"     "/gpfs/home2/${USER}/main/jobs/eval/original/cube/matrix"; do
     [[ -z "${candidate}" ]] && continue
     if resolved="$(cd "${candidate}" >/dev/null 2>&1 && pwd)"; then
       if [[ -f "${resolved}/baseline_matrix_sweep.csv" ]]; then
@@ -68,6 +45,28 @@ resolve_matrix_dir() {
     fi
   done
   return 1
+}
+
+parse_seed_list() {
+  local raw="${1:-42}"
+  local cleaned="${raw//[[:space:]]/}"
+  if [[ -z "${cleaned}" ]]; then
+    echo "ERROR: EVAL_SEEDS is empty." >&2
+    return 1
+  fi
+
+  IFS=',' read -r -a PARSED_SEEDS <<< "${cleaned}"
+  if (( ${#PARSED_SEEDS[@]} == 0 )); then
+    echo "ERROR: EVAL_SEEDS produced no seeds." >&2
+    return 1
+  fi
+
+  for seed in "${PARSED_SEEDS[@]}"; do
+    if ! [[ "${seed}" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: invalid seed '${seed}' in EVAL_SEEDS='${raw}'." >&2
+      return 1
+    fi
+  done
 }
 
 if ! MATRIX_DIR_RESOLVED="$(resolve_matrix_dir)"; then
@@ -89,10 +88,7 @@ export STABLEWM_HOME="${STABLEWM_HOME:-/scratch-shared/${USER}/stablewm_data}"
 
 resolve_dataset_path() {
   local candidate
-  for candidate in \
-    "${DATASET_PATH:-}" \
-    "${STABLEWM_HOME}/cube_single_expert.h5" \
-    "${STABLEWM_HOME}/ogbench/cube_single_expert.h5"; do
+  for candidate in     "${DATASET_PATH:-}"     "${STABLEWM_HOME}/cube_single_expert.h5"     "${STABLEWM_HOME}/ogbench/cube_single_expert.h5"; do
     [[ -z "${candidate}" ]] && continue
     if [[ -f "${candidate}" ]]; then
       echo "${candidate}"
@@ -115,59 +111,62 @@ mapfile -t PARAM_ROWS < <(
 )
 NUM_CONFIGS="${#PARAM_ROWS[@]}"
 
+if ! parse_seed_list "${EVAL_SEEDS:-42}"; then
+  exit 4
+fi
+NUM_SEEDS="${#PARSED_SEEDS[@]}"
+TOTAL_TASKS=$(( NUM_CONFIGS * NUM_SEEDS ))
+
 if (( NUM_CONFIGS == 0 )); then
   echo "ERROR: no parameter rows found in ${PARAMS_FILE}" >&2
-  exit 4
+  exit 5
 fi
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-}}"
 if [[ -z "${TASK_ID}" ]]; then
   echo "ERROR: SLURM_ARRAY_TASK_ID is not set." >&2
   echo "Submit with ./submit_baseline_matrix.sh or pass TASK_ID manually." >&2
-  exit 5
-fi
-
-if ! [[ "${TASK_ID}" =~ ^[0-9]+$ ]] || (( TASK_ID < 1 || TASK_ID > NUM_CONFIGS )); then
-  echo "ERROR: task id ${TASK_ID} is out of range 1-${NUM_CONFIGS}" >&2
   exit 6
 fi
 
-IFS=';' read -r GOAL_OFFSET_LABEL EVAL_BUDGET PLAN_HORIZON PLAN_RECEDING_HORIZON PLAN_ACTION_BLOCK SOLVER_NUM_SAMPLES SOLVER_N_STEPS <<< "${PARAM_ROWS[TASK_ID - 1]}"
+if ! [[ "${TASK_ID}" =~ ^[0-9]+$ ]] || (( TASK_ID < 1 || TASK_ID > TOTAL_TASKS )); then
+  echo "ERROR: task id ${TASK_ID} is out of range 1-${TOTAL_TASKS}" >&2
+  exit 7
+fi
+
+CONFIG_INDEX=$(( (TASK_ID - 1) / NUM_SEEDS + 1 ))
+SEED_INDEX=$(( (TASK_ID - 1) % NUM_SEEDS ))
+EVAL_SEED="${PARSED_SEEDS[SEED_INDEX]}"
+
+IFS=';' read -r GOAL_OFFSET_LABEL EVAL_BUDGET PLAN_HORIZON PLAN_RECEDING_HORIZON PLAN_ACTION_BLOCK SOLVER_NUM_SAMPLES SOLVER_N_STEPS <<< "${PARAM_ROWS[CONFIG_INDEX - 1]}"
 
 if [[ ! "${GOAL_OFFSET_LABEL}" =~ ^[Dd]([0-9]+)$ ]]; then
   echo "ERROR: invalid goal_offset value '${GOAL_OFFSET_LABEL}' in ${PARAMS_FILE}" >&2
-  exit 7
+  exit 8
 fi
 GOAL_OFFSET_STEPS="${BASH_REMATCH[1]}"
 
-for value_name in \
-  EVAL_BUDGET \
-  PLAN_HORIZON \
-  PLAN_RECEDING_HORIZON \
-  PLAN_ACTION_BLOCK \
-  SOLVER_NUM_SAMPLES \
-  SOLVER_N_STEPS \
-  NUM_EVAL; do
+for value_name in   EVAL_BUDGET   PLAN_HORIZON   PLAN_RECEDING_HORIZON   PLAN_ACTION_BLOCK   SOLVER_NUM_SAMPLES   SOLVER_N_STEPS   NUM_EVAL; do
   value="${!value_name}"
   if ! [[ "${value}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: ${value_name} must be an integer, got '${value}'." >&2
-    exit 8
+    exit 9
   fi
 done
 
-if [[ "${EVAL_DEVICE}" != "cpu" ]]; then
-  echo "ERROR: this baseline matrix is intended for CPU runs; got EVAL_DEVICE=${EVAL_DEVICE}" >&2
-  exit 9
-fi
-
 TASK_LABEL="d${GOAL_OFFSET_STEPS}_b${EVAL_BUDGET}_h${PLAN_HORIZON}_rh${PLAN_RECEDING_HORIZON}_blk${PLAN_ACTION_BLOCK}_ns${SOLVER_NUM_SAMPLES}_it${SOLVER_N_STEPS}"
+DISPLAY_LABEL="${TASK_LABEL}"
+if (( NUM_SEEDS > 1 )); then
+  DISPLAY_LABEL="${TASK_LABEL}_seed${EVAL_SEED}"
+fi
 JOB_TOKEN="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}_${SLURM_ARRAY_TASK_ID:-${TASK_ID}}"
-EVAL_SUBDIR="${SWEEP_NAME}/${TASK_LABEL}_job_${JOB_TOKEN}"
-RESULT_FILENAME="ogb_cube_results_${TASK_LABEL}.txt"
+EVAL_SUBDIR="${SWEEP_NAME}/${DISPLAY_LABEL}_job_${JOB_TOKEN}"
+RESULT_FILENAME="ogb_cube_results_${DISPLAY_LABEL}.txt"
 
 mkdir -p "${STABLEWM_HOME}"
 
 REPO_ROOT="${PROJECT_ROOT}"
+COMMON_HELPER="${REPO_ROOT}/jobs/eval/common/determinism_env.sh"
 
 module purge
 module load 2025
@@ -189,14 +188,31 @@ set -u
 
 cd "${REPO_ROOT}"
 
+if [[ ! -f "${COMMON_HELPER}" ]]; then
+  echo "ERROR: determinism helper not found: ${COMMON_HELPER}" >&2
+  exit 11
+fi
+
+# shellcheck source=/dev/null
+source "${COMMON_HELPER}"
+
+setup_eval_determinism_env   "${REPO_ROOT}"   "${EVAL_SEED}"   "${EVAL_DETERMINISM:-strict}"
+
+if [[ "${EVAL_DEVICE}" == "cpu" ]]; then
+  export CUDA_VISIBLE_DEVICES=""
+  export MUJOCO_GL="${MUJOCO_GL:-osmesa}"
+else
+  export MUJOCO_GL="${MUJOCO_GL:-egl}"
+fi
+
 if [[ ! -f "original_eval_with_manifest.py" ]]; then
   echo "ERROR: original_eval_with_manifest.py not found at ${REPO_ROOT}" >&2
-  exit 11
+  exit 12
 fi
 
 if [[ ! -f "third_party/lewm/eval.py" ]]; then
   echo "ERROR: third_party/lewm/eval.py not found at ${REPO_ROOT}" >&2
-  exit 12
+  exit 13
 fi
 
 CKPT_OBJECT_PATH="${STABLEWM_HOME}/${POLICY}_object.ckpt"
@@ -204,9 +220,14 @@ CKPT_OBJECT_PATH="${STABLEWM_HOME}/${POLICY}_object.ckpt"
 echo "Matrix dir: ${MATRIX_DIR_RESOLVED}"
 echo "Project root: ${REPO_ROOT}"
 echo "Parameter CSV: ${PARAMS_FILE}"
-echo "Task: ${TASK_ID}/${NUM_CONFIGS}"
+echo "Task: ${TASK_ID}/${TOTAL_TASKS}"
+echo "Config row: ${CONFIG_INDEX}/${NUM_CONFIGS}"
 echo "Sweep name: ${SWEEP_NAME}"
 echo "Task label: ${TASK_LABEL}"
+echo "Display label: ${DISPLAY_LABEL}"
+echo "Seed: ${EVAL_SEED}"
+echo "Seeds in sweep: ${EVAL_SEEDS:-42}"
+echo "Determinism: ${EVAL_DETERMINISM:-strict}"
 echo "Policy: ${POLICY}"
 echo "Config name: ${CONFIG_NAME}"
 echo "Eval device: ${EVAL_DEVICE}"
@@ -224,25 +245,25 @@ echo "Result filename: ${RESULT_FILENAME}"
 echo "Expected checkpoint: ${CKPT_OBJECT_PATH}"
 echo "Expected dataset: ${DATASET_PATH}"
 echo "Baseline entrypoint: third_party/lewm/eval.py via original_eval_with_manifest.py"
+print_eval_determinism_env
 
 if [[ ! -f "${DATASET_PATH}" ]]; then
   echo "ERROR: missing dataset ${DATASET_PATH}" >&2
   echo "Run setup first, for example:" >&2
   echo "  sbatch --export=ALL,STABLEWM_HOME=${STABLEWM_HOME} jobs/setup/download_cube.sh" >&2
-  exit 13
+  exit 14
 fi
 
 if [[ ! -f "${CKPT_OBJECT_PATH}" ]]; then
   echo "Checkpoint object not found. Converting from Hugging Face..."
-  python scripts/convert_hf_weights_to_object_ckpt.py \
-    --hf-url "${HF_URL}" \
-    --run-name "${POLICY}"
+  python scripts/convert_hf_weights_to_object_ckpt.py     --hf-url "${HF_URL}"     --run-name "${POLICY}"
 fi
 
 CMD=(
   python original_eval_with_manifest.py
   --config-name="${CONFIG_NAME}"
   "policy=${POLICY}"
+  "seed=${EVAL_SEED}"
   "eval.dataset_name=ogbench/cube_single_expert"
   "eval.num_eval=${NUM_EVAL}"
   "eval.goal_offset_steps=${GOAL_OFFSET_STEPS}"
