@@ -13,33 +13,35 @@ Code for **Mind the Gap: Promises and Pitfalls of Hierarchical Planning in LeWor
 
 Hi-LeWM extends LeWorldModel with a trainable high-level branch for long-horizon latent planning. Instead of searching directly over primitive actions for the full horizon, it learns latent macro-actions from chunks of low-level behavior, predicts future observation latents with a transformer high-level dynamics model, and uses hierarchical CEM to choose subgoals for the low-level planner.
 
-The codebase includes the training stack, planning policies, diagnostic tools, evaluation configs, tests, and selected figures for the paper. Large datasets and checkpoints are kept out of Git and archived separately on Zenodo at [doi:10.5281/zenodo.21353240](https://doi.org/10.5281/zenodo.21353240).
-
 ## Paper and Artifacts
 
 - Paper PDF: [additional_material/mind_the_gap_hi_lewm.pdf](./additional_material/mind_the_gap_hi_lewm.pdf)
 - arXiv: [placeholder link](https://arxiv.org/abs/XXXX.XXXXX)
 - Workshop: [WM@Booth 2026](https://wm-booth.org/)
 - OpenReview: [accepted submission](https://openreview.net/forum?id=2vw6vIV0qC)
-- Code and checkpoints: [doi:10.5281/zenodo.21353240](https://doi.org/10.5281/zenodo.21353240)
+- Checkpoints: [doi:10.5281/zenodo.21353240](https://doi.org/10.5281/zenodo.21353240)
 
 ## Main Contribution
 
-This project investigates a practical question: when does adding temporal hierarchy to a compact latent world model actually help long-horizon planning, and when does it make planning worse?
+Hi-LeWM studies when temporal hierarchy helps latent world-model planning and when it breaks down.
 
-The core contribution is a complete hierarchical planning implementation on top of LeWorldModel:
+The repo implements:
 
-- A transformer macro-action encoder maps variable-length primitive action chunks into compact latent actions.
-- A high-level transformer predictor learns waypoint-to-waypoint latent dynamics conditioned on those macro-actions.
-- A hierarchical CEM planner searches in macro-action space, rolls out the high-level predictor, chooses a latent subgoal, and delegates execution to the low-level LeWM planner.
-- A constrained empirical-macro CEM variant restricts high-level search toward macro-actions observed in training trajectories, reducing planner exploitation of unrealistic latent actions.
-- A decoder-probe diagnostic stack visualizes whether predicted latent subgoals are meaningful, reachable, and aligned with the low-level controller.
+- a transformer macro-action encoder for variable-length action chunks;
+- a high-level latent predictor for waypoint-to-waypoint dynamics;
+- hierarchical CEM that plans over macro-actions and delegates execution to LeWM;
+- empirical macro-action CEM, which constrains search toward actions seen in training data;
+- decoder-probe diagnostics for checking whether latent subgoals are visually meaningful and reachable.
 
-The main empirical result is that naive high-level CEM can underperform flat LeWM: it optimizes macro-actions that look good under the learned predictor but are poorly matched to the low-level controller. Constraining high-level search around empirically observed macro-actions recovers useful hierarchical regimes, especially at longer PushT horizons.
+The key result is that naive hierarchy is not enough: high-level CEM can exploit unsupported macro-actions and underperform the flat planner. Constraining search around empirical macro-actions makes hierarchy useful again at longer horizons.
 
 ## Technical Architecture
 
 Hi-LeWM keeps the LeWM latent interface and adds a high-level temporal abstraction layer.
+
+![Hi-LeWM architecture](./additional_material/architecture.png)
+
+The training path encodes waypoint observations with the LeWM encoder, encodes the primitive action chunk between waypoints as a macro-action, and trains the high-level predictor to forecast the next waypoint latent.
 
 ### Latent State Interface
 
@@ -116,12 +118,6 @@ Relevant files: `hi_policy.py`, `hi_eval.py`, `hi_waypoint_sampling.py`.
 - Tests for planning behavior, waypoint sampling, decoder probes, and training speedups.
 
 ## Visual Overview
-
-### Architecture
-
-![Hi-LeWM architecture](./additional_material/architecture.png)
-
-The training path encodes waypoint observations with the LeWM encoder, encodes the primitive action chunk between waypoints as a macro-action, and trains the high-level predictor to forecast the next waypoint latent.
 
 ### PushT Results
 
