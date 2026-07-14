@@ -31,13 +31,9 @@ from hi_train import build_action_chunks_batched
 from hi_train_decoder_probe import build_dataset_and_loaders
 
 
-DEFAULT_HI_CKPT = (
-    "/scratch-shared/scur0200/stablewm_data/runs/"
-    "hi_lewm_p2_train_hope2_22253175/"
-    "hi_lewm_p2_train_hope2_22253175_epoch_15_object.ckpt"
-)
+DEFAULT_HI_CKPT = os.environ.get("HI_LEWM_CHECKPOINT")
 DEFAULT_ENV_DUMP = REPO_ROOT / "environment.json"
-DEFAULT_SHARED_CACHE = Path(f"/scratch-shared/{os.environ.get('USER', 'scur0200')}/stablewm_data")
+DEFAULT_SHARED_CACHE = Path(os.environ.get("STABLEWM_HOME", REPO_ROOT / "data" / "stablewm"))
 
 
 @dataclass(slots=True)
@@ -117,7 +113,7 @@ def infer_cache_dir(*, run_dir: str | Path | None = None, hi_ckpt: str | Path | 
 
     raise FileNotFoundError(
         "Unable to infer StableWM cache dir. Set STABLEWM_HOME manually or pass a run/checkpoint "
-        "under the shared stablewm_data tree."
+        "under a StableWM data tree."
     )
 
 
@@ -139,7 +135,7 @@ def load_probe_bundle(
     *,
     run_dir: str | Path,
     probe_ckpt: str | Path | None = None,
-    hi_ckpt: str | Path = DEFAULT_HI_CKPT,
+    hi_ckpt: str | Path | None = DEFAULT_HI_CKPT,
     split: str = "val",
     cache_dir: str | Path | None = None,
     batch_size: int | None = None,
@@ -149,6 +145,8 @@ def load_probe_bundle(
     prefetch_factor: int | None = None,
     device: str | torch.device | None = None,
 ):
+    if hi_ckpt is None:
+        raise ValueError("Pass hi_ckpt or set HI_LEWM_CHECKPOINT to the hierarchical checkpoint path.")
     run_dir = resolve_run_dir(run_dir)
     cfg = load_probe_cfg(run_dir / "config.yaml")
     cfg = clone_cfg(cfg)

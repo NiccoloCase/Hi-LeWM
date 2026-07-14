@@ -74,8 +74,8 @@ def load_dataset(*, dataset_name: str, cache_dir: str | None):
     if cache_dir is not None:
         resolved_cache = resolve_cache_dir(cache_dir)
     else:
-        shared_cache = Path(f"/scratch-shared/{os.environ.get('USER', 'user')}/stablewm_data")
-        resolved_cache = shared_cache if shared_cache.exists() else resolve_cache_dir(None)
+        stablewm_home = os.environ.get("STABLEWM_HOME")
+        resolved_cache = Path(stablewm_home) if stablewm_home else resolve_cache_dir(None)
     return swm.data.HDF5Dataset(dataset_name, keys_to_cache=["action"], cache_dir=resolved_cache)
 
 

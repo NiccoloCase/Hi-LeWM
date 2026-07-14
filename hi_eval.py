@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 import re
 from contextlib import contextmanager
+
+if os.getenv("LEWM_WRAPPER_DRY_RUN") == "1":
+    cmd = [sys.executable, __file__, *sys.argv[1:]]
+    print("[dry-run] hierarchical eval:", " ".join(cmd))
+    raise SystemExit(0)
 
 import hydra
 import numpy as np

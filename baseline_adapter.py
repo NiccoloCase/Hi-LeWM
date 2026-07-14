@@ -72,6 +72,12 @@ def baseline_script_path(script_name: str) -> Path:
 
 
 def run_baseline_script(script_name: str, args: list[str], *, extra_env: dict[str, str] | None = None) -> int:
+    if os.getenv("LEWM_WRAPPER_DRY_RUN") == "1":
+        script = BASELINE_ROOT / script_name
+        cmd = [sys.executable, str(script), *args]
+        print("[dry-run] baseline wrapper:", " ".join(cmd))
+        return 0
+
     script = baseline_script_path(script_name)
     proc_env = None
     if extra_env:
@@ -79,9 +85,6 @@ def run_baseline_script(script_name: str, args: list[str], *, extra_env: dict[st
         proc_env.update(extra_env)
 
     cmd = [sys.executable, str(script), *args]
-    if os.getenv("LEWM_WRAPPER_DRY_RUN") == "1":
-        print("[dry-run] baseline wrapper:", " ".join(cmd))
-        return 0
     return subprocess.call(cmd, cwd=str(REPO_ROOT), env=proc_env)
 
 
