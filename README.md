@@ -17,7 +17,7 @@ The codebase includes the training stack, planning policies, diagnostic tools, e
 
 ## Paper and Artifacts
 
-- Paper PDF: [additional_material/mind_the_gap_hi_lewm.pdf](additional_material/mind_the_gap_hi_lewm.pdf)
+- Paper PDF: [additional_material/mind_the_gap_hi_lewm.pdf](./additional_material/mind_the_gap_hi_lewm.pdf)
 - arXiv: [placeholder link](https://arxiv.org/abs/XXXX.XXXXX)
 - Workshop: [WM@Booth 2026](https://wm-booth.org/)
 - OpenReview: [accepted submission](https://openreview.net/forum?id=2vw6vIV0qC)
@@ -108,7 +108,7 @@ Relevant files: `hi_policy.py`, `hi_eval.py`, `hi_waypoint_sampling.py`.
 
 - PyTorch and PyTorch Lightning training loop built around `stable-worldmodel` / LeWorldModel components.
 - Hydra configs for train/eval sweeps across PushT, Cube, TwoRoom, and Reacher.
-- W&B logging, hyperparameter tracking, resumable run IDs, and artifact-friendly output directories.
+- W&B logging, hyperparameter tracking, resumable run IDs, and structured output directories.
 - GPU training with bf16 precision, AdamW, gradient clipping, persistent data-loader workers, prefetching, and pinned memory.
 - Multi-seed evaluation protocol with deterministic process setup and explicit planning budgets.
 - Decoder-probe reports and plot rendering scripts for inspecting latent subgoal quality.
@@ -119,13 +119,13 @@ Relevant files: `hi_policy.py`, `hi_eval.py`, `hi_waypoint_sampling.py`.
 
 ### Architecture
 
-![Hi-LeWM architecture](additional_material/architecture.png)
+![Hi-LeWM architecture](./additional_material/architecture.png)
 
 The training path encodes waypoint observations with the LeWM encoder, encodes the primitive action chunk between waypoints as a macro-action, and trains the high-level predictor to forecast the next waypoint latent.
 
 ### PushT Results
 
-![PushT success rates](additional_material/pusht_success_rates.png)
+![PushT success rates](./additional_material/pusht_success_rates.png)
 
 PushT is the main long-horizon diagnostic task. The sweep compares flat LeWM, naive Hi-LeWM, and constrained hierarchical planning across increasing goal offsets.
 
@@ -133,13 +133,13 @@ PushT is the main long-horizon diagnostic task. The sweep compares flat LeWM, na
 
 | Unconstrained CEM | Constrained empirical-macro CEM |
 | --- | --- |
-| ![Oracle versus generated subgoals](additional_material/oracle_vs_generated_subgoals.jpeg) | ![Constrained CEM subgoals](additional_material/constrained_cem_subgoals.jpeg) |
+| ![Oracle versus generated subgoals](./additional_material/oracle_vs_generated_subgoals.jpeg) | ![Constrained CEM subgoals](./additional_material/constrained_cem_subgoals.jpeg) |
 
 These qualitative diagnostics show the gap between visually plausible predicted subgoals and subgoals that the low-level controller can actually reach.
 
 ### Decoder Probe
 
-![Decoder probe sanity check](additional_material/decoder_probe_sanity.jpeg)
+![Decoder probe sanity check](./additional_material/decoder_probe_sanity.jpeg)
 
 The decoder probe maps latent waypoints back to image space for debugging. It is not part of the acting policy; it is an interpretability tool for inspecting whether high-level latents stay on a meaningful visual manifold.
 
